@@ -152,7 +152,7 @@ void init(char speed) {
 int r = 0;
 static void read_task() {
 	while (1) {
-		if(xSemaphoreTake(mutex, 10) == pdTRUE) {
+		if(xSemaphoreTake(mutex, portMAX_DELAY) == pdTRUE) {
 			r++;
 			if(dataAvailable-1 >= UART_BUF_SIZE) {
 				printfmt("BO @ %d : %d\n", r, dataAvailable);
@@ -267,13 +267,15 @@ bool quickSuppressToggle() {
 	return quickSuppress;
 }
 
-static void app_task() {
+static void tx_task() {
 	while(1) {
-		if(dataAvailable && xSemaphoreTake(mutex, 10) == pdTRUE) {
+		if(dataAvailable && xSemaphoreTake(mutex, portMAX_DELAY) == pdTRUE) {
 			memcpy(inputBuffer + slen, data, dataAvailable);
 			slen += dataAvailable;
 			dataAvailable = 0;
 			xSemaphoreGive(mutex);
+			if(inputBuffer[slen-1] == '\r')
+				inputBuffer[slen-1] = '\n';
 
 			bool hasEndl = false;
 			for(int i = 0; i < slen; i++) {
@@ -329,6 +331,14 @@ static void app_task() {
 						case 'q':
 							quickSuppressToggle();
 							break;
+						case '~':
+						{
+							char buf[300];
+							vTaskGetRunTimeStats(buf);
+							print(buf);
+							print("\n");
+						}
+						break;
 						case 'r':
 							printmsg("reset", "Resetting...");
 							uart_wait_tx_done(UART_NUM_1, 5000 / portTICK_PERIOD_MS);
@@ -350,9 +360,17 @@ static void app_task() {
 				slen = 0;
 			}
 		}
+		vTaskDelay(1);
+	}
+}
 
-		CAN_frame_t frame;
-		if(setupComplete && xQueueReceive(CAN_cfg.rx_queue, &frame, 0) == pdTRUE) {
+static void rx_task() {
+	CAN_frame_t frame;
+	while(1) {
+		if(!setupComplete)
+			goto app_end;
+
+		if(setupComplete && xQueueReceive(CAN_cfg.rx_queue, &frame, portMAX_DELAY) == pdTRUE) {
 			if(quickSuppressCheck(frame.MsgID))
 				goto app_end;
 
@@ -384,7 +402,7 @@ void initUART() {
 	uart_config_t uart_config = {
 		.baud_rate = 921600,
 		.data_bits = UART_DATA_8_BITS,
-		.parity    = UART_PARITY_DISABLE,
+		.parity    = UART_PARITY_EN,
 		.stop_bits = UART_STOP_BITS_1,
 		.flow_ctrl = UART_HW_FLOWCTRL_DISABLE
 	};
@@ -396,8 +414,17 @@ void initUART() {
 
 void initNVS() {
 	esp_err_t e = nvs_flash_init();
-	if(e != ESP_OK)
+	if (e == ESP_ERR_NVS_NO_FREE_PAGES) {
+		printerr("nvsferr", "NVS is being initialized", e);
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        e = nvs_flash_init();
+		if(e != ESP_OK) {
+			printerr("nvsierr2", "NVS was not initialized", e);
+		}
+    } else if(e != ESP_OK) {
 		printerr("nvsierr", "NVS was not initialized", e);
+	}
+
 	e = nvs_open(NVS_NAMESAPCE, NVS_READWRITE, &storage);
 	if(e != ESP_OK)
 		printerr("nvsoerr", "NVS was not opened", e);
@@ -408,14 +435,16 @@ void app_main() {
 	initNVS();
 	readBoardName();
 
-	char buf[75];
-	sprintf(buf, "%s Connected", boardName);
-	printmsg("poweron", buf);
+	{
+		char buf[75];
+		sprintf(buf, "%s Connected", boardName);
+		printmsg("poweron", buf);
+	}
 
-	uart_flush(UART_NUM_1);
 	mutex = xSemaphoreCreateMutex();
 	if(mutex == NULL)
 		printerr("muterr", "A mutex could not be created", -1);
 	xTaskCreate(read_task, "uart_read_task", 1024*2, NULL, 10, NULL);
-	xTaskCreate(app_task, "uart_app_task", 1024*8, NULL, 9, NULL);
+	xTaskCreate(rx_task, "can_rx_task", 1024*2, NULL, 9, NULL);
+	xTaskCreate(tx_task, "can_tx_task", 1024*6, NULL, 8, NULL);
 }
