@@ -12,8 +12,8 @@
 #define UART_USB_TXD    (GPIO_NUM_1)
 #define UART_USB_RXD    (GPIO_NUM_3)
 #define UART_SPEED      (921600)
-#define UART_TX_BUF_SZ  (256)
-#define UART_RX_BUF_SZ  (256)
+#define UART_TX_BUF_SZ  (0)
+#define UART_RX_BUF_SZ  (512)
 #define UART_EVT_BUF_SZ (10)
 
 #define NVS_STOCK_NAME "CANOpener"
@@ -24,7 +24,7 @@
 #define FILTER_SIZE (32)
 
 char boardName[64];
-uint8_t data[UART_TX_BUF_SZ];
+uint8_t data[UART_RX_BUF_SZ];
 int dataAvailable = 0;
 char inputBuffer[256];
 unsigned int slen = 0;
@@ -138,7 +138,7 @@ void init(char speed) {
 			return;
 	}
 
-	CAN_cfg.rx_queue = xQueueCreate(10, sizeof(CAN_frame_t));
+	CAN_cfg.rx_queue = xQueueCreate(50, sizeof(CAN_frame_t));
 	CAN_cfg.rx_pin_id = GPIO_NUM_26;
 	CAN_cfg.tx_pin_id = GPIO_NUM_27;
 	CAN_init();
@@ -155,11 +155,11 @@ static void read_task() {
 	while (1) {
 		if(xSemaphoreTake(mutex, portMAX_DELAY) == pdTRUE) {
 			r++;
-			if(dataAvailable-1 >= UART_TX_BUF_SZ) {
+			if(dataAvailable-1 >= UART_RX_BUF_SZ) {
 				printfmt("BO @ %d : %d\n", r, dataAvailable);
 				continue;
 			}
-			int len = uart_read_bytes(UART_NUM_1, data + dataAvailable, UART_TX_BUF_SZ - dataAvailable, 0);
+			int len = uart_read_bytes(UART_NUM_1, data + dataAvailable, UART_RX_BUF_SZ - dataAvailable, 0);
 			dataAvailable += len;
 			xSemaphoreGive(mutex);
 		}
@@ -349,14 +349,24 @@ static void tx_task() {
 					printerr("notstarted", "Not yet initialized, message not sent", -1);
 				} else {
 					CAN_frame_t send;
-					send.MsgID = (int) strtol(part, NULL, 16);
+					send.MsgID = (uint32_t) strtol(part, NULL, 16);
 					send.FIR.B.DLC = 0;
+					send.FIR.B.RTR = 0;
+					send.FIR.B.FF = CAN_frame_std;
 					part = strtok(NULL, " ");
 					while(part != NULL) {
 						send.data.u8[send.FIR.B.DLC++] = (unsigned char) strtol(part, NULL, 16);
 						part = strtok(NULL, " ");
 					}
 					CAN_write_frame(&send);
+
+					printfmt("{\"id\": \"0x%.3lX\", \"dlc\": %1d, \"timestamp\": %lu, \"type\": \"send\", \"data\": [", send.MsgID, send.FIR.B.DLC, millis());
+					for(int i = 0; i < send.FIR.B.DLC; i++) {
+						printfmt("\"0x%.2X\"", send.data.u8[i]);
+						if(i != send.FIR.B.DLC-1)
+							print(", ");
+					}
+					print("]}\n");
 				}
 				slen = 0;
 			}
