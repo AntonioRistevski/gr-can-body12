@@ -9,21 +9,22 @@
 
 #include "CAN.h"
 
-#define ECHO_TEST_TXD  (GPIO_NUM_1)
-#define ECHO_TEST_RXD  (GPIO_NUM_3)
-#define ECHO_TEST_RTS  (UART_PIN_NO_CHANGE)
-#define ECHO_TEST_CTS  (UART_PIN_NO_CHANGE)
+#define UART_USB_TXD    (GPIO_NUM_1)
+#define UART_USB_RXD    (GPIO_NUM_3)
+#define UART_SPEED      (921600)
+#define UART_TX_BUF_SZ  (256)
+#define UART_RX_BUF_SZ  (256)
+#define UART_EVT_BUF_SZ (10)
 
 #define NVS_STOCK_NAME "CANOpener"
 #define NVS_NAMESAPCE "canopener"
 #define NVS_KEY_BOARDNAME "boardName"
 #define clearBoardName() nvs_erase_key(storage, NVS_KEY_BOARDNAME)
 
-#define UART_BUF_SIZE (128)
 #define FILTER_SIZE (32)
 
 char boardName[64];
-uint8_t data[UART_BUF_SIZE];
+uint8_t data[UART_TX_BUF_SZ];
 int dataAvailable = 0;
 char inputBuffer[256];
 unsigned int slen = 0;
@@ -154,11 +155,11 @@ static void read_task() {
 	while (1) {
 		if(xSemaphoreTake(mutex, portMAX_DELAY) == pdTRUE) {
 			r++;
-			if(dataAvailable-1 >= UART_BUF_SIZE) {
+			if(dataAvailable-1 >= UART_TX_BUF_SZ) {
 				printfmt("BO @ %d : %d\n", r, dataAvailable);
 				continue;
 			}
-			int len = uart_read_bytes(UART_NUM_1, data + dataAvailable, UART_BUF_SIZE - dataAvailable, 0);
+			int len = uart_read_bytes(UART_NUM_1, data + dataAvailable, UART_TX_BUF_SZ - dataAvailable, 0);
 			dataAvailable += len;
 			xSemaphoreGive(mutex);
 		}
@@ -400,15 +401,15 @@ static void rx_task() {
 
 void initUART() {
 	uart_config_t uart_config = {
-		.baud_rate = 921600,
+		.baud_rate = UART_SPEED,
 		.data_bits = UART_DATA_8_BITS,
 		.parity    = UART_PARITY_EN,
 		.stop_bits = UART_STOP_BITS_1,
 		.flow_ctrl = UART_HW_FLOWCTRL_DISABLE
 	};
 	uart_param_config(UART_NUM_1, &uart_config);
-	uart_set_pin(UART_NUM_1, ECHO_TEST_TXD, ECHO_TEST_RXD, ECHO_TEST_RTS, ECHO_TEST_CTS);
-	uart_driver_install(UART_NUM_1, UART_BUF_SIZE * 2, 0, 0, NULL, 0);
+	uart_set_pin(UART_NUM_1, UART_USB_TXD, UART_USB_RXD, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+	uart_driver_install(UART_NUM_1, UART_RX_BUF_SZ, UART_TX_BUF_SZ, 0, NULL, 0);
 	print("\n");
 }
 
