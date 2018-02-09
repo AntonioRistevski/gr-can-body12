@@ -163,7 +163,7 @@ static void read_task() {
 			dataAvailable += len;
 			xSemaphoreGive(mutex);
 		}
-		vTaskDelay(1);
+		taskYIELD();
 	}
 }
 
@@ -269,6 +269,8 @@ bool quickSuppressToggle() {
 }
 
 static void tx_task() {
+	esp_err_t e;
+	char* part;
 	while(1) {
 		if(dataAvailable && xSemaphoreTake(mutex, portMAX_DELAY) == pdTRUE) {
 			memcpy(inputBuffer + slen, data, dataAvailable);
@@ -286,8 +288,7 @@ static void tx_task() {
 
 			if(hasEndl) {
 				inputBuffer[slen-1] = 0;
-				char* part = strtok(inputBuffer, " ");
-				esp_err_t e;
+				part = strtok(inputBuffer, " ");
 
 				if(part[0] == '/') { // control sequence
 					switch(part[1]) {
@@ -334,10 +335,9 @@ static void tx_task() {
 							break;
 						case '~':
 						{
-							char buf[300];
+							char buf[256];
 							vTaskGetRunTimeStats(buf);
 							print(buf);
-							print("\n");
 						}
 						break;
 						case 'r':
@@ -361,12 +361,14 @@ static void tx_task() {
 				slen = 0;
 			}
 		}
-		vTaskDelay(1);
+		taskYIELD();
 	}
 }
 
 static void rx_task() {
 	CAN_frame_t frame;
+	char jsonbuf[256];
+	char minijsonbuf[16];
 	while(1) {
 		if(!setupComplete)
 			goto app_end;
@@ -385,17 +387,16 @@ static void rx_task() {
 					goto app_end;
 			}
 
-			printfmt("{\"id\": \"0x%.3lX\", \"dlc\": %1d, \"timestamp\": %lu, \"type\": \"standard\", \"data\": [", frame.MsgID, frame.FIR.B.DLC, millis());
+			sprintf_s(jsonbuf, 256, "{\"id\": \"0x%.3lX\", \"dlc\": %1d, \"timestamp\": %lu, \"type\": \"standard\", \"data\": [", frame.MsgID, frame.FIR.B.DLC, millis());
 			for(int i = 0; i < frame.FIR.B.DLC; i++) {
-				printfmt("\"0x%.2X\"", frame.data.u8[i]);
-				if(i != frame.FIR.B.DLC-1)
-					print(", ");
+				sprintf_s(minijsonbuf, 16, "\"0x%.2X\"%s", frame.data.u8[i], ((i != frame.FIR.B.DLC-1) ? ", ", "]}\n"));
+				strcat_s(jsonbuf, 256, minijsonbuf);
 			}
-			print("]}\n");
+			print(jsonbuf);
 		}
 
 		app_end:
-		vTaskDelay(1);
+		taskYIELD();
 	}
 }
 
@@ -403,8 +404,8 @@ void initUART() {
 	uart_config_t uart_config = {
 		.baud_rate = UART_SPEED,
 		.data_bits = UART_DATA_8_BITS,
-		.parity    = UART_PARITY_EN,
-		.stop_bits = UART_STOP_BITS_1,
+		.parity    = UART_PARITY_ODD,
+		.stop_bits = UART_STOP_BITS_2,
 		.flow_ctrl = UART_HW_FLOWCTRL_DISABLE
 	};
 	uart_param_config(UART_NUM_1, &uart_config);
