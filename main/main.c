@@ -13,8 +13,10 @@
 #define UART_USB_RXD    (GPIO_NUM_3)
 #define UART_SPEED      (921600)
 #define UART_TX_BUF_SZ  (0)
-#define UART_RX_BUF_SZ  (512)
-#define UART_EVT_BUF_SZ (10)
+#define UART_RX_BUF_SZ  (256)
+#define UART_EVT_BUF_SZ (128)
+QueueHandle_t uartEventQueue, uartLineQueue;
+int uartParityEvents = 0;
 
 #define NVS_STOCK_NAME "CANOpener"
 #define NVS_NAMESAPCE "canopener"
@@ -24,10 +26,6 @@
 #define FILTER_SIZE (32)
 
 char boardName[64];
-uint8_t data[UART_RX_BUF_SZ];
-int dataAvailable = 0;
-char inputBuffer[256];
-unsigned int slen = 0;
 CAN_device_t CAN_cfg;
 nvs_handle storage;
 
@@ -41,9 +39,11 @@ uint16_t filter[FILTER_SIZE];
 int currentFilterSize = 0;
 bool filterSuppressing = false;
 
-SemaphoreHandle_t mutex;
+static void uart_read_task();
+static void can_tx_task();
+static void can_rx_task();
 
-int millis() {
+unsigned long millis() {
 	return xTaskGetTickCount() * portTICK_PERIOD_MS;
 }
 
@@ -61,11 +61,11 @@ void printfmt(const char* format, ...) {
 }
 
 void printerr(const char* id, const char* msg, int code) {
-	printfmt("{\"type\": \"error\", \"message\": \"%s\", \"id\": \"%s\", \"code\": %d, \"timestamp\": %d}\n", msg, id, code, millis());
+	printfmt("{\"type\": \"error\", \"message\": \"%s\", \"id\": \"%s\", \"code\": %d, \"timestamp\": %lu}\n", msg, id, code, millis());
 }
 
 void printmsg(const char* id, const char* msg) {
-	printfmt("{\"type\": \"info\", \"message\": \"%s\", \"id\": \"%s\", \"timestamp\": %d}\n", msg, id, millis());
+	printfmt("{\"type\": \"info\", \"message\": \"%s\", \"id\": \"%s\", \"timestamp\": %lu}\n", msg, id, millis());
 }
 
 void wait(unsigned int ms) {
@@ -100,18 +100,18 @@ esp_err_t setBoardName(const char* name) {
 void boardInformation() {
 	printfmt("{\"type\": \"boardInformation\", \"name\": \"%s\", \"version\": \"V2.0.0\", ", boardName);
 	printfmt("\"author\": \"Paul Hollinsky\", \"speed\": \"%c\", \"filterSuppressing\": %s, \"maxFilters\": %d, ", setSpeed, (filterSuppressing ? "true" : "false"), FILTER_SIZE);
-	printfmt("\"quickSuppress\": %s, \"filter\": [", (quickSuppress ? "true" : "false"));
+	printfmt("\"quickSuppress\": %s, \"parityErrors\": %d, \"freeMemory\": %d, \"filter\": [", (quickSuppress ? "true" : "false"), uartParityEvents, xPortGetFreeHeapSize());
 	for(int i = 0; i < currentFilterSize; i++) {
 		printfmt("\"0x%.2X\"", filter[i]);
 		if(i != currentFilterSize-1)
 			print(", ");
 	}
-	printfmt("], \"hardware\": \"esp32\", \"timestamp\": %d}\n", millis());
+	printfmt("], \"hardware\": \"esp32\", \"timestamp\": %lu}\n", millis());
 }
 
 void help() {
 	print("{\"type\": \"info\", \"message\": \"Commands:\\n\\t/i [speed] - Initialize at the specified speed, which can be (1=83.3k, 2=125k, 3=500k)\\n\\t/? - Show Help\\n\\t/. - Board Information\\n\\t/n [name] - Set Board Name\\n\\t/o [filters...] - Only show the specified IDs, hex represented and split by spaces\\n\\t/s [filters...] - Suppress the following IDs, hex represented and split by spaces\\n\\t/a - Disable filtering\\n\\t/q - Quick suppress toggle\\n\\t/r - Reset ");
-	printfmt("%s\", \"id\": \"help\", \"timestamp\": %d}\n", boardName, millis());
+	printfmt("%s\", \"id\": \"help\", \"timestamp\": %lu}\n", boardName, millis());
 }
 
 void init(char speed) {
@@ -138,7 +138,7 @@ void init(char speed) {
 			return;
 	}
 
-	CAN_cfg.rx_queue = xQueueCreate(50, sizeof(CAN_frame_t));
+	CAN_cfg.rx_queue = xQueueCreate(10, sizeof(CAN_frame_t));
 	CAN_cfg.rx_pin_id = GPIO_NUM_26;
 	CAN_cfg.tx_pin_id = GPIO_NUM_27;
 	CAN_init();
@@ -148,22 +148,67 @@ void init(char speed) {
 
 	sprintf(buf, "%s Initialized", boardName);
 	printmsg("init", buf);
+
+	xTaskCreate(can_rx_task, "can_rx_task", 1024*2, NULL, 9, NULL);
 }
 
-int r = 0;
-static void read_task() {
-	while (1) {
-		if(xSemaphoreTake(mutex, portMAX_DELAY) == pdTRUE) {
-			r++;
-			if(dataAvailable-1 >= UART_RX_BUF_SZ) {
-				printfmt("BO @ %d : %d\n", r, dataAvailable);
-				continue;
+static void uart_read_task() {
+	uart_event_t event;
+	uint8_t data[512];
+	uint16_t dataAvailable = 0;
+	while(true) {
+		if(xQueueReceive(uartEventQueue, &event, portMAX_DELAY) == pdTRUE) {
+			switch(event.type) {
+				case UART_DATA:
+				{
+					bool hasEndl = false;
+					int space = 512 - dataAvailable;
+					int len = uart_read_bytes(UART_NUM_1, data + dataAvailable, event.size > space ? space : event.size, portMAX_DELAY);
+					dataAvailable += len;
+					for(uint8_t* d = data + dataAvailable - len; d < data + dataAvailable; d++) {
+						if(*d == '\r')
+							*d = '\n';
+						if(*d == '\n')
+							hasEndl = true;
+					}
+					if(hasEndl) {
+						*(data + dataAvailable) = 0;
+						int slen = strlen((const char*) data);
+						char* line = malloc(slen + 1);
+						strcpy(line, (const char*) data);
+						xQueueSend(uartLineQueue, &line, portMAX_DELAY);
+						dataAvailable = 0;
+					}
+					break;
+				}
+				case UART_BREAK:
+					printmsg("uartbreak", "UART Break");
+					break;
+				case UART_BUFFER_FULL:
+					printmsg("uartbufmax", "UART RX Buffer Full");
+					break;
+				case UART_FIFO_OVF:
+					printmsg("uartovf", "UART FIFO Overflow");
+					break;
+				case UART_FRAME_ERR:
+					printmsg("uartframe", "UART RX Frame Error");
+					break;
+				case UART_PARITY_ERR:
+					uartParityEvents++;
+					break;
+				case UART_DATA_BREAK:
+					printmsg("uartdbreak", "UART Data Break");
+					break;
+				case UART_PATTERN_DET:
+					printmsg("uartpattern", "UART Pattern Detected");
+					break;
+				case UART_EVENT_MAX:
+					printmsg("uartevtmax", "UART Event Buffer Full");
+					break;
+				default:
+					printerr("uartevt", "UART Event", event.type);
 			}
-			int len = uart_read_bytes(UART_NUM_1, data + dataAvailable, UART_RX_BUF_SZ - dataAvailable, 0);
-			dataAvailable += len;
-			xSemaphoreGive(mutex);
 		}
-		taskYIELD();
 	}
 }
 
@@ -268,124 +313,96 @@ bool quickSuppressToggle() {
 	return quickSuppress;
 }
 
-static void tx_task() {
+static void can_tx_task() {
 	esp_err_t e;
+	char* inputBuffer;
 	char* part;
-	while(1) {
-		if(dataAvailable && xSemaphoreTake(mutex, portMAX_DELAY) == pdTRUE) {
-			memcpy(inputBuffer + slen, data, dataAvailable);
-			slen += dataAvailable;
-			dataAvailable = 0;
-			xSemaphoreGive(mutex);
-			if(inputBuffer[slen-1] == '\r')
-				inputBuffer[slen-1] = '\n';
-
-			bool hasEndl = false;
-			for(int i = 0; i < slen; i++) {
-				if(inputBuffer[i] == '\n')
-					hasEndl = true;
-			}
-
-			if(hasEndl) {
-				inputBuffer[slen-1] = 0;
-				part = strtok(inputBuffer, " ");
-
-				if(part[0] == '/') { // control sequence
-					switch(part[1]) {
-						case 'i':
-							init(part[3]);
-							break;
-						case '?':
-							help();
-							break;
-						case '.':
-							boardInformation();
-							break;
-						case 'n':
-							e = setBoardName(inputBuffer+3);
-							if(e != ESP_OK)
-								printerr("badnamenvs", "The board name could not be set", e);
-							else
-								printmsg("namechange", "The name has been changed");
-							break;
-						case 'o':
-						case 's':
-							filterSuppressing = (part[1] == 's');
-							filteringEnabled = true;
-							currentFilterSize = 0;
-							part = strtok(NULL, " ");
-							while(part != NULL) {
-								if(currentFilterSize >= FILTER_SIZE) {
-									printmsg("filterwarn", "Too many filters!");
-									break;
-								}
-								filter[currentFilterSize++] = (uint16_t) strtol(part, NULL, 16);
-								part = strtok(NULL, " ");
-							}
-							printmsg("filteron", "Filtering enabled");
-							break;
-						case 'a':
-							filteringEnabled = false;
-							printmsg("filteroff", "Filtering disabled");
-							if(quickSuppress)
-								printmsg("qsnote", "Note: Quick suppress is still on");
-							break;
-						case 'q':
-							quickSuppressToggle();
-							break;
-						case '~':
-						{
-							char buf[256];
-							vTaskGetRunTimeStats(buf);
-							print(buf);
-						}
+	CAN_frame_t send;
+	send.FIR.B.FF = CAN_frame_std;
+	send.FIR.B.RTR = 0;
+	while(true) {
+		if(xQueueReceive(uartLineQueue, &inputBuffer, portMAX_DELAY) == pdTRUE) {
+			part = strtok(inputBuffer, " ");
+			if(part[0] == '/') { // control sequence
+				switch(part[1]) {
+					case 'i':
+						init(part[3]);
 						break;
-						case 'r':
-							printmsg("reset", "Resetting...");
-							uart_wait_tx_done(UART_NUM_1, 5000 / portTICK_PERIOD_MS);
-							esp_restart();
-					}
-				} else if(!setupComplete) {
-					printerr("notstarted", "Not yet initialized, message not sent", -1);
-				} else {
-					CAN_frame_t send;
-					send.MsgID = (uint32_t) strtol(part, NULL, 16);
-					send.FIR.B.DLC = 0;
-					send.FIR.B.RTR = 0;
-					send.FIR.B.FF = CAN_frame_std;
-					part = strtok(NULL, " ");
-					while(part != NULL) {
-						send.data.u8[send.FIR.B.DLC++] = (unsigned char) strtol(part, NULL, 16);
+					case '?':
+						help();
+						break;
+					case '.':
+						boardInformation();
+						break;
+					case 'n':
+						e = setBoardName(inputBuffer+3);
+						if(e != ESP_OK)
+							printerr("badnamenvs", "The board name could not be set", e);
+						else
+							printmsg("namechange", "The name has been changed");
+						break;
+					case 'o':
+					case 's':
+						filterSuppressing = (part[1] == 's');
+						filteringEnabled = true;
+						currentFilterSize = 0;
 						part = strtok(NULL, " ");
+						while(part != NULL) {
+							if(currentFilterSize >= FILTER_SIZE) {
+								printmsg("filterwarn", "Too many filters!");
+								break;
+							}
+							filter[currentFilterSize++] = (uint16_t) strtol(part, NULL, 16);
+							part = strtok(NULL, " ");
+						}
+						printmsg("filteron", "Filtering enabled");
+						break;
+					case 'a':
+						filteringEnabled = false;
+						printmsg("filteroff", "Filtering disabled");
+						if(quickSuppress)
+							printmsg("qsnote", "Note: Quick suppress is still on");
+						break;
+					case 'q':
+						quickSuppressToggle();
+						break;
+					case '~':
+					{
+						char buf[256];
+						vTaskGetRunTimeStats(buf);
+						print(buf);
 					}
-					CAN_write_frame(&send);
-
-					printfmt("{\"id\": \"0x%.3lX\", \"dlc\": %1d, \"timestamp\": %lu, \"type\": \"send\", \"data\": [", send.MsgID, send.FIR.B.DLC, millis());
-					for(int i = 0; i < send.FIR.B.DLC; i++) {
-						printfmt("\"0x%.2X\"", send.data.u8[i]);
-						if(i != send.FIR.B.DLC-1)
-							print(", ");
-					}
-					print("]}\n");
+					break;
+					case 'r':
+						printmsg("reset", "Resetting...");
+						uart_wait_tx_done(UART_NUM_1, 5000 / portTICK_PERIOD_MS);
+						esp_restart();
 				}
-				slen = 0;
+			} else if(!setupComplete) {
+				printerr("notstarted", "Not yet initialized, message not sent", -1);
+			} else {
+				send.MsgID = (int) strtol(part, NULL, 16);
+				send.FIR.B.DLC = 0;
+				part = strtok(NULL, " ");
+				while(part != NULL) {
+					send.data.u8[send.FIR.B.DLC++] = (unsigned char) strtol(part, NULL, 16);
+					part = strtok(NULL, " ");
+				}
+				CAN_write_frame(&send);
 			}
+			free(inputBuffer);
 		}
-		taskYIELD();
 	}
 }
 
-static void rx_task() {
+static void can_rx_task() {
 	CAN_frame_t frame;
 	char jsonbuf[256];
 	char minijsonbuf[16];
-	while(1) {
-		if(!setupComplete)
-			goto app_end;
-
-		if(setupComplete && xQueueReceive(CAN_cfg.rx_queue, &frame, portMAX_DELAY) == pdTRUE) {
+	while(true) {
+		if(xQueueReceive(CAN_cfg.rx_queue, &frame, portMAX_DELAY) == pdTRUE) {
 			if(quickSuppressCheck(frame.MsgID))
-				goto app_end;
+				goto rx_task_end;
 
 			if(filteringEnabled) {
 				bool found = false;
@@ -394,18 +411,18 @@ static void rx_task() {
 						found = true; 
 				}
 				if(found == filterSuppressing)
-					goto app_end;
+					goto rx_task_end;
 			}
 
-			sprintf_s(jsonbuf, 256, "{\"id\": \"0x%.3lX\", \"dlc\": %1d, \"timestamp\": %lu, \"type\": \"standard\", \"data\": [", frame.MsgID, frame.FIR.B.DLC, millis());
+			sprintf(jsonbuf, "{\"id\": \"0x%.3lX\", \"dlc\": %1d, \"timestamp\": %lu, \"type\": \"standard\", \"data\": [", (unsigned long) frame.MsgID, frame.FIR.B.DLC, millis());
 			for(int i = 0; i < frame.FIR.B.DLC; i++) {
-				sprintf_s(minijsonbuf, 16, "\"0x%.2X\"%s", frame.data.u8[i], ((i != frame.FIR.B.DLC-1) ? ", ", "]}\n"));
-				strcat_s(jsonbuf, 256, minijsonbuf);
+				sprintf(minijsonbuf, "\"0x%.2X\"%s", frame.data.u8[i], ((i != frame.FIR.B.DLC-1) ? ", " : "]}\n"));
+				strcat(jsonbuf, minijsonbuf);
 			}
 			print(jsonbuf);
 		}
 
-		app_end:
+		rx_task_end:
 		taskYIELD();
 	}
 }
@@ -420,7 +437,8 @@ void initUART() {
 	};
 	uart_param_config(UART_NUM_1, &uart_config);
 	uart_set_pin(UART_NUM_1, UART_USB_TXD, UART_USB_RXD, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
-	uart_driver_install(UART_NUM_1, UART_RX_BUF_SZ, UART_TX_BUF_SZ, 0, NULL, 0);
+	uart_driver_install(UART_NUM_1, UART_RX_BUF_SZ, UART_TX_BUF_SZ, UART_EVT_BUF_SZ, &uartEventQueue, 0);
+	uartLineQueue = xQueueCreate(64, sizeof(char*));
 	print("\n");
 }
 
@@ -453,10 +471,6 @@ void app_main() {
 		printmsg("poweron", buf);
 	}
 
-	mutex = xSemaphoreCreateMutex();
-	if(mutex == NULL)
-		printerr("muterr", "A mutex could not be created", -1);
-	xTaskCreate(read_task, "uart_read_task", 1024*2, NULL, 10, NULL);
-	xTaskCreate(rx_task, "can_rx_task", 1024*2, NULL, 9, NULL);
-	xTaskCreate(tx_task, "can_tx_task", 1024*6, NULL, 8, NULL);
+	xTaskCreate(uart_read_task, "uart_read_task", 1024*2, NULL, 10, NULL);
+	xTaskCreate(can_tx_task, "can_tx_task", 1024*6, NULL, 8, NULL);
 }
