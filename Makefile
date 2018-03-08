@@ -5,5 +5,8 @@
 
 PROJECT_NAME := canopener
 
+GIT_VERSION := $(shell git describe --abbrev=7 --dirty --always --tags)
+CFLAGS += -DGRVERSION=\"$(GIT_VERSION)\"
+
 include $(IDF_PATH)/make/project.mk
 
