@@ -36,16 +36,16 @@
  * \brief CAN frame type (standard/extended)
  */
 typedef enum {
-	CAN_frame_std=0, 						/**< Standard frame, using 11 bit identifer. */
-	CAN_frame_ext=1 						/**< Extended frame, using 29 bit identifer. */
-}CAN_frame_format_t;
+	CAN_frame_std = 0, 						/**< Standard frame, using 11 bit identifer. */
+	CAN_frame_ext = 1 						/**< Extended frame, using 29 bit identifer. */
+} CAN_frame_format_t;
 
 /**
  * \brief CAN RTR
  */
 typedef enum {
-	CAN_no_RTR=0, 							/**< No RTR frame. */
-	CAN_RTR=1 								/**< RTR frame. */
+	CAN_no_RTR = 0, 						/**< No RTR frame. */
+	CAN_RTR = 1 							/**< RTR frame. */
 }CAN_RTR_t;
 
 /** \brief Frame information record type */
@@ -62,11 +62,13 @@ typedef union{uint32_t U;					/**< \brief Unsigned access */
 
 /** \brief CAN Frame structure */
 typedef struct {
-	CAN_FIR_t	FIR;						/**< \brief Frame information record*/
-    uint32_t 	MsgID;     					/**< \brief Message ID */
+	CAN_FIR_t	FIR;						/**< \brief Frame information record */
+    uint32_t 	id;     					/**< \brief Message ID */
+	uint8_t		dlc;						/**< \brief Message Data Length */
     union {
-        uint8_t u8[8];						/**< \brief Payload byte access*/
-        uint32_t u32[2];					/**< \brief Payload u32 access*/
+        uint8_t u8[8];						/**< \brief Payload byte access */
+		uint8_t bytes[8];					/**< \brief Payload byte access (nicer name) */
+        uint32_t u32[2];					/**< \brief Payload u32 access */
     } data;
 }CAN_frame_t;
 

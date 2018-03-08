@@ -33,28 +33,26 @@
 #include "freertos/queue.h"
 #include "driver/gpio.h"
 
-
 /** \brief CAN Node Bus speed */
-typedef enum  {
-	CAN_SPEED_83K3BPS=83,
-	CAN_SPEED_100KBPS=100, 				/**< \brief CAN Node runs at 100kBit/s. */
-	CAN_SPEED_125KBPS=125, 				/**< \brief CAN Node runs at 125kBit/s. */
-	CAN_SPEED_250KBPS=250, 				/**< \brief CAN Node runs at 250kBit/s. */
-	CAN_SPEED_500KBPS=500, 				/**< \brief CAN Node runs at 500kBit/s. */
-	CAN_SPEED_800KBPS=800, 				/**< \brief CAN Node runs at 800kBit/s. */
-	CAN_SPEED_1000KBPS=1000				/**< \brief CAN Node runs at 1000kBit/s. */
-}CAN_speed_t;
+typedef enum {
+	CAN_SPEED_83K3BPS = 83,
+	CAN_SPEED_100KBPS = 100, 			/**< \brief CAN Node runs at 100kBit/s. */
+	CAN_SPEED_125KBPS = 125, 			/**< \brief CAN Node runs at 125kBit/s. */
+	CAN_SPEED_250KBPS = 250, 			/**< \brief CAN Node runs at 250kBit/s. */
+	CAN_SPEED_500KBPS = 500, 			/**< \brief CAN Node runs at 500kBit/s. */
+	CAN_SPEED_800KBPS = 800, 			/**< \brief CAN Node runs at 800kBit/s. */
+	CAN_SPEED_1000KBPS = 1000			/**< \brief CAN Node runs at 1000kBit/s. */
+} CAN_speed_t;
 
 /** \brief CAN configuration structure */
-typedef struct  {
-	CAN_speed_t			speed;			/**< \brief CAN speed. */
-    gpio_num_t 			tx_pin_id;		/**< \brief TX pin. */
-    gpio_num_t 			rx_pin_id;		/**< \brief RX pin. */
-    QueueHandle_t 		rx_queue;		/**< \brief Handler to FreeRTOS RX queue. */
-}CAN_device_t;
+typedef struct {
+	CAN_speed_t speed;					/**< \brief CAN speed. */
+    gpio_num_t tx_pin_id;				/**< \brief TX pin. */
+    gpio_num_t rx_pin_id;				/**< \brief RX pin. */
+    QueueHandle_t rx_queue;				/**< \brief Handler to FreeRTOS RX queue. */
+} CAN_device_t;
 
 /** \brief CAN configuration reference */
 extern CAN_device_t CAN_cfg;
-
 
 #endif /* __DRIVERS_CAN_CFG_H__ */
