@@ -6,6 +6,8 @@
 #include "driver/uart.h"
 
 #include "CAN.h"
+#include "CAN_UDS.h"
+#include "util.h"
 
 #define UART_USB_TXD    	(GPIO_NUM_1)
 #define UART_USB_RXD    	(GPIO_NUM_3)
@@ -13,7 +15,6 @@
 #define UART_TX_BUF_SZ  	(0)
 #define UART_RX_BUF_SZ  	(256)
 #define UART_EVT_BUF_SZ		(128)
-#define UART_FMT_BUF_SZ		(160)
 #define UART_LINE_BUF_SZ	(512)
 
 #define CAN_RXD				(GPIO_NUM_26)
@@ -27,8 +28,9 @@ typedef struct {
 	unsigned long invalidAfter;
 } CAN_int16_data_t;
 
-QueueHandle_t uartEventQueue, uartLineQueue, canUpdateQueue;
-CAN_device_t CAN_cfg;
+QueueHandle_t uartEventQueue, uartLineQueue;
+CAN_device_t CAN_cfg; // Name cannot change, extern reference
+CAN_UDS_cfg_t CAN_UDS_cfg; // Name cannot change, extern reference
 
 CAN_int16_data_t rpm;
 bool transmit = true;
@@ -37,35 +39,6 @@ static void uart_read_task();
 static void uart_action_task();
 static void can_rx_task();
 static void ctrl_task();
-
-unsigned long millis() {
-	return xTaskGetTickCount() * portTICK_PERIOD_MS;
-}
-
-void print(const char* str) {
-	uart_write_bytes(UART_NUM_1, str, strlen(str));
-}
-
-char __fmtbuf[UART_FMT_BUF_SZ];
-void printfmt(const char* format, ...) {
-	va_list args;
-	va_start(args, format);
-	vsprintf(__fmtbuf, format, args);
-	va_end(args);
-	print(__fmtbuf);
-}
-
-void printerr(const char* id, const char* msg, int code) {
-	printfmt("{\"type\": \"error\", \"message\": \"%s\", \"id\": \"%s\", \"code\": %d, \"timestamp\": %lu}\n", msg, id, code, millis());
-}
-
-void printmsg(const char* id, const char* msg) {
-	printfmt("{\"type\": \"info\", \"message\": \"%s\", \"id\": \"%s\", \"timestamp\": %lu}\n", msg, id, millis());
-}
-
-void wait(unsigned int ms) {
-	vTaskDelay(ms / portTICK_PERIOD_MS);
-}
 
 void initVariables() {
 	rpm.lastUpdate = 0;
@@ -84,9 +57,6 @@ void initUART() {
 	uart_set_pin(UART_NUM_1, UART_USB_TXD, UART_USB_RXD, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
 	uart_driver_install(UART_NUM_1, UART_RX_BUF_SZ, UART_TX_BUF_SZ, UART_EVT_BUF_SZ, &uartEventQueue, 0);
 	uartLineQueue = xQueueCreate(64, sizeof(char*));
-	
-	xTaskCreate(uart_read_task, "uart_read_task", 1024*2, NULL, 10, NULL);
-	xTaskCreate(uart_action_task, "uart_action_task", 1024*6, NULL, 8, NULL);
 }
 
 void initCAN() {
@@ -95,7 +65,15 @@ void initCAN() {
 	CAN_cfg.rx_pin_id = CAN_RXD;
 	CAN_cfg.tx_pin_id = CAN_TXD;
 	CAN_init();
-	xTaskCreate(can_rx_task, "can_rx_task", 1024*2, NULL, 9, NULL);
+}
+
+void initCAN_UDS() {
+	CAN_UDS_cfg.outId = 0x601;
+	CAN_UDS_cfg.inId = 0x602;
+	CAN_UDS_cfg.queue = xQueueCreate(CAN_QUEUE_SZ, sizeof(CAN_frame_t));
+	strcpy(CAN_UDS_cfg.name, "Example Module");
+	strcpy(CAN_UDS_cfg.version, GRVERSION);
+	CAN_UDS_init();
 }
 
 bool dataIsValid(CAN_int16_data_t* data) {
@@ -104,17 +82,6 @@ bool dataIsValid(CAN_int16_data_t* data) {
 	if(data->lastUpdate + data->invalidAfter < millis())
 		return false; // Data is no longer valid
 	return true;
-}
-
-void canSend(int id, int dlc, unsigned char data[]) {
-	CAN_frame_t send;
-	send.FIR.B.FF = CAN_frame_std;
-	send.FIR.B.RTR = 0;
-	send.id = id;
-	send.dlc = dlc;
-	for(int i = 0; i < dlc; i++)
-		send.data.bytes[i] = data[i];
-	CAN_write_frame(&send);
 }
 
 static void uart_read_task() {
@@ -140,7 +107,7 @@ static void uart_read_task() {
 					}
 					// If we got the endline, copy the string into the queue, and it will be handled by uart_action_task
 					if(hasEndl) {
-						*(data + dataAvailable) = 0;
+						*(data + dataAvailable - 1) = 0;
 						int slen = strlen((const char*) data);
 						char* line = malloc(slen + 1);
 						strcpy(line, (const char*) data);
@@ -150,31 +117,30 @@ static void uart_read_task() {
 					break;
 				}
 				case UART_BREAK:
-					printmsg("uartbreak", "UART Break");
+					print("UART Break\n");
 					break;
 				case UART_BUFFER_FULL:
-					printmsg("uartbufmax", "UART RX Buffer Full");
+					print("UART RX Buffer Full\n");
 					break;
 				case UART_FIFO_OVF:
-					printmsg("uartovf", "UART FIFO Overflow");
+					print("UART FIFO Overflow\n");
 					break;
 				case UART_FRAME_ERR:
-					printmsg("uartframe", "UART RX Frame Error");
-					break;
-				case UART_PARITY_ERR:
-					// Don't really care about parity errors?
+					print("UART RX Frame Error\n");
 					break;
 				case UART_DATA_BREAK:
-					printmsg("uartdbreak", "UART Data Break");
+					print("UART Data Break\n");
 					break;
 				case UART_PATTERN_DET:
-					printmsg("uartpattern", "UART Pattern Detected");
+					print("UART Pattern Detected\n");
 					break;
 				case UART_EVENT_MAX:
-					printmsg("uartevtmax", "UART Event Buffer Full");
+					print("UART Event Buffer Full\n");
+					break;
+				case UART_PARITY_ERR: // Don't care
 					break;
 				default:
-					printerr("uartevt", "UART Event", event.type);
+					printfmt("UART Event %d\n", event.type);
 			}
 		}
 	}
@@ -205,7 +171,7 @@ static void can_rx_task() {
 	CAN_frame_t frame;
 	while(true) {
 		if(xQueueReceive(CAN_cfg.rx_queue, &frame, portMAX_DELAY) == pdTRUE) {
-			//xQueueSend(canUpdateQueue, &frame, portMAX_DELAY);
+			xQueueSend(CAN_UDS_cfg.queue, &frame, portMAX_DELAY); // Pass messages through to the updater
 			switch(frame.id) {
 				case 0x5F0:
 					if(frame.dlc == 8) { // Probably check the DLC to make sure you're not getting garbage
@@ -239,20 +205,9 @@ static void ctrl_task() {
 
 		toSend[0] = (!gpio_get_level(GPIO_NUM_0)) & 0x01;
 		if(transmit)
-			canSend(0x130, 1, toSend);
+			CAN_send(0x130, 1, toSend);
 
 		wait(10); // This control loop will be run at 100Hz
-	}
-}
-
-static void ctrl_task2() {
-	unsigned char toSend[8];
-	for(int i = 0; i < 8; i++)
-		toSend[i] = 0xaa;
-	while(true) {
-		canSend(0x1, 8, toSend);
-		vTaskDelay(5);
-		//wait(1); // This control loop will be run at 100Hz
 	}
 }
 
@@ -260,9 +215,10 @@ void app_main() {
 	initVariables();
 	initUART();
 	initCAN();
+	initCAN_UDS();
 
-	//printfmt("Git Version %s\n", GRVERSION);
-
+	xTaskCreate(uart_read_task, "uart_read_task", 1024*2, NULL, 10, NULL);
+	xTaskCreate(uart_action_task, "uart_action_task", 1024*6, NULL, 8, NULL);
+	xTaskCreate(can_rx_task, "can_rx_task", 1024*2, NULL, 9, NULL);
 	xTaskCreate(ctrl_task, "ctrl_task", 1024, NULL, 7, NULL);
-	xTaskCreate(ctrl_task2, "ctrl_task2", 1024, NULL, 6, NULL);
 }
