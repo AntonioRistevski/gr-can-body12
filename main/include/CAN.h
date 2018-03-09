@@ -32,6 +32,9 @@
 #include <stdint.h>
 #include "CAN_config.h"
 
+#define CAN_PADDING_BYTE (0xAA)
+#define CAN_ISO_WAIT_TIME (20)
+
 /**
  * \brief CAN frame type (standard/extended)
  */
@@ -68,10 +71,29 @@ typedef struct {
     union {
         uint8_t u8[8];						/**< \brief Payload byte access */
 		uint8_t bytes[8];					/**< \brief Payload byte access (nicer name) */
+		uint16_t u16[4];					/**< \brief Payload word access */
+		uint16_t words[4];					/**< \brief Payload word access (nicer name) */
         uint32_t u32[2];					/**< \brief Payload u32 access */
     } data;
-}CAN_frame_t;
+} CAN_frame_t;
 
+/** \brief CAN ISO-TP Frame structure */
+typedef struct {
+    uint16_t 	id;     					/**< \brief Message ID */
+	uint16_t	dlc;						/**< \brief Message Data Length */
+    uint8_t*	data;						/**< \brief Message Data */
+} CAN_ISO_frame_t;
+
+/** \brief CAN ISO-TP Frame static structure */
+typedef struct {
+    uint16_t 		id;     				/**< \brief Message ID */
+	uint16_t		dlc;					/**< \brief Message Data Length */
+	CAN_frame_t		lastFrame;				/**< \brief Last frame received */
+	uint8_t			lastCtrl;				/**< \brief Control bits from last frame */
+	uint8_t			lastIndex;				/**< \brief Index from last frame */
+	uint16_t		dataReceived;			/**< \brief Length of data buffer*/
+    uint8_t[4095]	data;					/**< \brief Message Data */
+} CAN_ISO_static_frame_t;
 
 /**
  * \brief Initialize the CAN Module
@@ -87,6 +109,58 @@ int CAN_init(void);
  * \return  0 Frame has been written to the module
  */
 int CAN_write_frame(const CAN_frame_t* p_frame);
+
+/**
+ * \brief Send a can frame, synchronously
+ *
+ * \param	p_frame	Pointer to the frame to be send, see #CAN_frame_t
+ * \return  0 Frame has been written to the bus
+ */
+int CAN_write_frame_sync(const CAN_frame_t* p_frame);
+
+/**
+ * \brief Send a standard can frame, synchronously
+ *
+ * \param	id The arbitration ID to use
+ * \param	dlc The length of the data
+ * \param	data The data to send
+ * \return  0 Frame has been written to the bus
+ */
+int CAN_send(int id, int dlc, unsigned char data[]);
+
+/**
+ * \brief Send ISO-TP frames, synchronously
+ *
+ * \param	id The arbitration ID to use
+ * \param	dlc The length of the data
+ * \param	data The data to send
+ * \return  0 Frames have been written to the bus
+ */
+int CAN_ISO_send(const uint16_t id, const uint16_t dlc, const unsigned char data[]);
+
+/**
+ * \brief Send a (null terminated) string as ISO-TP frames, synchronously
+ *
+ * \param	id The arbitration ID to use
+ * \param	str The data to send
+ * \return  0 Frames have been written to the bus
+ */
+int CAN_ISO_str_send(const uint16_t id, const char* str);
+
+/**
+ * \brief Minify an ISO-TP frame (uses malloc!)
+ *
+ * \param	src Static Frame
+ * \param	dest Dynamic Frame
+ */
+void CAN_ISO_frame_minify(const CAN_ISO_static_frame_t* src, CAN_ISO_frame_t* dest);
+
+/**
+ * \brief Invalidate an ISO-TP frame
+ *
+ * \param	frame Static Frame
+ */
+void CAN_ISO_static_frame_invalidate(CAN_ISO_static_frame_t* frame);
 
 /**
  * \brief Stops the CAN Module
