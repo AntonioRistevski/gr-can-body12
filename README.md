@@ -1,4 +1,4 @@
-# CANOpener
+# CAN Node Example
 by Paul Hollinsky
 
-Now with a lot more power
+An example of a CAN Node for Grizzlies Racing. Not done yet.
