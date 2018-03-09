@@ -68,8 +68,9 @@ void initCAN() {
 }
 
 void initCAN_UDS() {
-	CAN_UDS_cfg.outId = 0x601;
-	CAN_UDS_cfg.inId = 0x602;
+	CAN_UDS_cfg.outId = 0x701;
+	CAN_UDS_cfg.inId = 0x702;
+	CAN_UDS_cfg.broadcastId = 0x703;
 	CAN_UDS_cfg.queue = xQueueCreate(CAN_QUEUE_SZ, sizeof(CAN_frame_t));
 	strcpy(CAN_UDS_cfg.name, "Example Module");
 	strcpy(CAN_UDS_cfg.version, GRVERSION);

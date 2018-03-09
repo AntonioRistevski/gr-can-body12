@@ -5,6 +5,7 @@
 
 static bool stop = false;
 static bool uploading = false;
+static bool updated = false;
 static QueueHandle_t isoQueue;
 
 static void CAN_UDS_rx_task() {
@@ -190,6 +191,7 @@ static void CAN_UDS_ISO_task() {
 						buf[1] = 0x00; // Okay, ready to restart
 						CAN_ISO_send(CAN_UDS_cfg.outId, 2, buf);
 						uploading = false;
+						updated = true;
 					} else {
 						buf[1] = 0x01; // Okay, ready for more
 						buf[2] = bytesWritten >> 24;
@@ -235,13 +237,15 @@ static void CAN_UDS_broadcast_task() {
 		toSend[1] = CAN_UDS_cfg.outId;
 		toSend[2] = CAN_UDS_cfg.inId >> 8;
 		toSend[3] = CAN_UDS_cfg.inId;
-		toSend[4] = uploading;
-		CAN_send(CAN_UDS_BROADCAST_ARB, 5, toSend);
+		toSend[4] = CAN_UDS_cfg.broadcastId >> 8;
+		toSend[5] = CAN_UDS_cfg.broadcastId;
+		toSend[6] = uploading | (updated << 1);
+		CAN_send(CAN_UDS_BROADCAST_ARB, 7, toSend);
 
 		if(uploading)
 			continue; // Don't transmit version while uploading
 
-		CAN_ISO_str_send(CAN_UDS_cfg.outId, version);
+		CAN_ISO_str_send(CAN_UDS_cfg.broadcastId, version);
 	}
 }
 
