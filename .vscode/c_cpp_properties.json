@@ -11,6 +11,7 @@
             "intelliSenseMode": "clang-x64",
             "browse": {
                 "path": [
+					"/Users/paulywog/Code/esp/esp-idf/components",
                     "/usr/include",
                     "/usr/local/include",
                     "${workspaceRoot}"
