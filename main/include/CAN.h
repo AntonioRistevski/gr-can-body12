@@ -29,7 +29,6 @@
 #ifndef __DRIVERS_CAN_H__
 #define __DRIVERS_CAN_H__
 
-#include <stdint.h>
 #include "CAN_config.h"
 
 #define CAN_PADDING_BYTE (0xAA)
@@ -92,7 +91,7 @@ typedef struct {
 	uint8_t			lastCtrl;				/**< \brief Control bits from last frame */
 	uint8_t			lastIndex;				/**< \brief Index from last frame */
 	uint16_t		dataReceived;			/**< \brief Length of data buffer*/
-    uint8_t[4095]	data;					/**< \brief Message Data */
+    uint8_t			data[4095];				/**< \brief Message Data */
 } CAN_ISO_static_frame_t;
 
 /**

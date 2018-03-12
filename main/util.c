@@ -1,5 +1,11 @@
 #include "util.h"
 
+#include <stdarg.h>
+#include <string.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "driver/uart.h"
+
 unsigned long millis() {
 	return xTaskGetTickCount() * portTICK_PERIOD_MS;
 }

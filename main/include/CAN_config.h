@@ -31,7 +31,6 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
-#include "driver/gpio.h"
 
 /** \brief CAN Node Bus speed */
 typedef enum {

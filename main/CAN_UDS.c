@@ -1,7 +1,10 @@
 #include "CAN_UDS.h"
-#include "CAN.h"
-#include "freertos/FreeRTOS.h"
+
+#include "freertos/task.h"
 #include "esp_ota_ops.h"
+
+#include "CAN.h"
+#include "util.h"
 
 static bool stop = false;
 static bool uploading = false;
@@ -17,7 +20,7 @@ static void CAN_UDS_rx_task() {
 	isoFrame.lastFrame.id = 0x800; // Not a valid Arb ID, so used as a flag
 	while(!stop) {
 		if(xQueueReceive(CAN_UDS_cfg.queue, &frame, portMAX_DELAY) == pdTRUE) {
-			if(frame.id === CAN_UDS_cfg.inId) {
+			if(frame.id == CAN_UDS_cfg.inId) {
 				uint8_t ctrl = frame.data.bytes[0] >> 4;
 
 				if(ctrl == 1 && isoFrame.lastFrame.id != 0x800)
@@ -74,16 +77,16 @@ static void CAN_UDS_ISO_task() {
 	int i;
 	CAN_ISO_frame_t frame;
 	esp_ota_handle_t otaHandle;
-	esp_partition_t nextPartition;
-	size_t updateSize;
-	size_t bytesWritten;
+	const esp_partition_t* nextPartition = NULL;
+	size_t updateSize = NULL;
+	size_t bytesWritten = 0;
 	esp_err_t err;
 	uint8_t buf[260];
 	while(!stop) {
 		if(xQueueReceive(isoQueue, &frame, portMAX_DELAY) == pdTRUE) {
 			uint8_t sid = frame.data[0];
 			buf[0] = sid + 0x40; // Standard response sid
-			unit8_t sf = frame.data[1];
+			//uint8_t sf = frame.data[1]; subfunction, not used yet
 			switch(sid) {
 				case 0x11: // ECU Reset
 					if(uploading) {
@@ -110,7 +113,7 @@ static void CAN_UDS_ISO_task() {
 						break;
 					}
 
-					uint8_t* memory = (frame.data[1] << 24 | frame.data[2] << 16 | frame.data[3] << 8 | frame.data[4]);
+					uint8_t* memory = (uint8_t*) (frame.data[1] << 24 | frame.data[2] << 16 | frame.data[3] << 8 | frame.data[4]);
 					uint8_t amt = frame.data[5];
 					for(i = 0; i < amt; i++)
 						buf[i+1] = *(memory + i);

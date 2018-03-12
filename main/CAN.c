@@ -30,17 +30,21 @@
 
 #include "CAN.h"
 
-#include "freertos/FreeRTOS.h"
-#include "freertos/queue.h"
+#include <math.h>
+#include <stdint.h>
+#include <string.h>
 
 #include "esp_intr.h"
 #include "soc/dport_reg.h"
-#include <math.h>
-
+#include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
+#include "freertos/task.h"
+#include "freertos/semphr.h"
 #include "driver/gpio.h"
 
 #include "CAN_regdef.h"
 #include "CAN_config.h"
+#include "util.h"
 
 static void CAN_read_frame();
 static SemaphoreHandle_t sendMutex = NULL;
@@ -214,7 +218,7 @@ int CAN_ISO_send(const uint16_t id, const uint16_t dlc, const unsigned char data
 }
 
 int CAN_ISO_str_send(const uint16_t id, const char* str) {
-	return CAN_ISO_send(id, strlen(str), str);
+	return CAN_ISO_send(id, strlen(str), (const unsigned char*) str);
 }
 
 void CAN_ISO_frame_minify(const CAN_ISO_static_frame_t* src, CAN_ISO_frame_t* dest) {
