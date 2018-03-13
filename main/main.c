@@ -160,7 +160,7 @@ static void uart_action_task() {
 				print("OK, transmitting\n");
 			}
 			else {
-				printfmt("? %s", inputBuffer);
+				printfmt("? %s\n", inputBuffer);
 			}
 
 			free(inputBuffer); // uart_read_task mallocs, we have to free the memory
