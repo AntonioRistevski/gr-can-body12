@@ -112,12 +112,16 @@ static void CAN_UDS_ISO_task() {
 						CAN_ISO_send(CAN_UDS_cfg.outId, 3, buf);
 						break;
 					}
-
-					uint8_t* memory = (uint8_t*) (frame.data[1] << 24 | frame.data[2] << 16 | frame.data[3] << 8 | frame.data[4]);
-					uint8_t amt = frame.data[5];
-					for(i = 0; i < amt; i++)
-						buf[i+1] = *(memory + i);
-					CAN_ISO_send(CAN_UDS_cfg.outId, amt+1, buf);
+					
+					buf[0] = 0x7f; // Reject
+					buf[1] = sid;
+					buf[2] = 0x31; // Request out of range (always for now)
+					CAN_ISO_send(CAN_UDS_cfg.outId, 3, buf);
+					// uint8_t* memory = (uint8_t*) (frame.data[1] << 24 | frame.data[2] << 16 | frame.data[3] << 8 | frame.data[4]);
+					// uint8_t amt = frame.data[5];
+					// for(i = 0; i < amt; i++)
+					// 	buf[i+1] = *(memory + i);
+					// CAN_ISO_send(CAN_UDS_cfg.outId, amt+1, buf);
 					break;
 				case 0x34: // Request Download
 					if(uploading) {
