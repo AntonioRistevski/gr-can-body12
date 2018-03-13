@@ -232,7 +232,6 @@ static void CAN_UDS_ISO_task() {
 static void CAN_UDS_broadcast_task() {
 	unsigned char toSend[5];
 	char version[145];
-	sprintf(version, "{\"n\":\"%s\",\"v\":\"%s\"}", CAN_UDS_cfg.name, CAN_UDS_cfg.version);
 	while(!stop) {
 		wait(CAN_UDS_BROADCAST_RATE);
 
@@ -248,6 +247,7 @@ static void CAN_UDS_broadcast_task() {
 		if(uploading)
 			continue; // Don't transmit version while uploading
 
+		sprintf(version, "{\"n\":\"%s\",\"v\":\"%s\"}", CAN_UDS_cfg.name, CAN_UDS_cfg.version);
 		CAN_ISO_str_send(CAN_UDS_cfg.broadcastId, version);
 	}
 }
