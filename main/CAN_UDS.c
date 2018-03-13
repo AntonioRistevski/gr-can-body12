@@ -259,7 +259,7 @@ int CAN_UDS_init() {
 	if(isoQueue == pdFALSE)
 		return -1; // Queue could not be created
 
-	xTaskCreate(CAN_UDS_broadcast_task, "CAN_UDS_broadcast_task", 1024, NULL, 7, NULL);
+	xTaskCreate(CAN_UDS_broadcast_task, "CAN_UDS_broadcast_task", 1024 * 4, NULL, 7, NULL);
 	xTaskCreate(CAN_UDS_rx_task, "CAN_UDS_rx_task", 1024 * 6, NULL, 7, NULL);
 	xTaskCreate(CAN_UDS_ISO_task, "CAN_UDS_ISO_task", 1024 * 3, NULL, 6, NULL);
 	return 0;

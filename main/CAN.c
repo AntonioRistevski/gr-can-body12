@@ -48,6 +48,7 @@
 
 static void CAN_read_frame();
 static SemaphoreHandle_t sendMutex = NULL;
+static SemaphoreHandle_t asyncMutex = NULL;
 
 bool txComplete = false;
 static void CAN_isr(void *arg_p){
@@ -113,7 +114,7 @@ static void CAN_read_frame(){
 }
 
 int CAN_write_frame(const CAN_frame_t* p_frame){
-	if(xSemaphoreTake(sendMutex, portMAX_DELAY) == pdFALSE)
+	if(xSemaphoreTake(asyncMutex, portMAX_DELAY) == pdFALSE)
 		return -1; // Timed out
 
 	//write frame information record
@@ -140,7 +141,7 @@ int CAN_write_frame(const CAN_frame_t* p_frame){
 
 	// Transmit frame
 	MODULE_CAN->CMR.B.TR=1;
-	xSemaphoreGive(sendMutex);
+	xSemaphoreGive(asyncMutex);
 	return 0;
 }
 
@@ -151,7 +152,11 @@ int CAN_write_frame_sync(const CAN_frame_t* p_frame) {
 	int res = CAN_write_frame(p_frame);
 	if(res)
 		return res; // Do not block, because we got an error
-	while(!txComplete); // Blocking action
+    unsigned long endTime = millis() + 500;
+	while(!txComplete && millis() < endTime) // Blocking action
+        taskYIELD();
+    if(!txComplete)
+        res = -1; // Mark that we timed out
 	txComplete = false;
 	xSemaphoreGive(sendMutex);
 	return res;
@@ -187,8 +192,9 @@ int CAN_ISO_send(const uint16_t id, const uint16_t dlc, const unsigned char data
 		return CAN_write_frame_sync(&send);
 	} else {
 		int sent = 0;
-		send.data.words[0] = 0x1000; // Start frame
-		send.data.words[0] |= (0x0fff & dlc);
+		send.data.bytes[0] = 0x10; // Start frame
+		send.data.bytes[0] |= 0x0f & (dlc << 16);
+        send.data.bytes[1] = dlc;
 		for(i = 2; i < 8; i++)
 			send.data.bytes[i] = data[i-2];
 		sent += 6;
@@ -206,7 +212,7 @@ int CAN_ISO_send(const uint16_t id, const uint16_t dlc, const unsigned char data
 				if(sent + (i-1) >= dlc)
 					send.data.bytes[i] = CAN_PADDING_BYTE;
 				else
-					send.data.bytes[i] = data[i-1];
+					send.data.bytes[i] = data[sent + i - 1];
 			}
 			sent += 7;
 			int res = CAN_write_frame_sync(&send);
@@ -242,6 +248,11 @@ int CAN_init() {
 		sendMutex = xSemaphoreCreateMutex();
 	if(sendMutex == NULL)
 		return -1; // The mutex could not be created successfully
+
+    if(asyncMutex == NULL)
+		asyncMutex = xSemaphoreCreateMutex();
+	if(asyncMutex == NULL)
+		return -2; // The mutex could not be created successfully
 
 	//enable module
 	DPORT_SET_PERI_REG_MASK(DPORT_PERIP_CLK_EN_REG, DPORT_CAN_CLK_EN);
