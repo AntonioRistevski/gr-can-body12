@@ -19,7 +19,7 @@
 
 #define CAN_RXD				(GPIO_NUM_26)
 #define CAN_TXD				(GPIO_NUM_27)
-#define CAN_QUEUE_SZ 		(10)
+#define CAN_QUEUE_SZ 		(35)
 #define CAN_SPEED			(CAN_SPEED_500KBPS)
 
 typedef struct {

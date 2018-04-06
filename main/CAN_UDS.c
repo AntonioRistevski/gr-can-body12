@@ -5,6 +5,7 @@
 
 #include "CAN.h"
 #include "util.h"
+#include <string.h>
 
 static bool stop = false;
 static bool uploading = false;
@@ -20,7 +21,7 @@ static void CAN_UDS_rx_task() {
 	isoFrame.lastFrame.id = 0x800; // Not a valid Arb ID, so used as a flag
 	while(!stop) {
 		if(xQueueReceive(CAN_UDS_cfg.queue, &frame, portMAX_DELAY) == pdTRUE) {
-			if(frame.id == CAN_UDS_cfg.inId) {
+			if(frame.id == CAN_UDS_cfg.inId || (frame.id == 0x700 && isoFrame.lastFrame.id == 0x800)) {
 				uint8_t ctrl = frame.data.bytes[0] >> 4;
 
 				if(ctrl == 1 && isoFrame.lastFrame.id != 0x800)
@@ -30,9 +31,16 @@ static void CAN_UDS_rx_task() {
 					isoFrame.lastFrame = frame;
 					switch(ctrl) {
 						case 0x1:
-							isoFrame.dlc = frame.data.words[0] & 0x0fff;
+							isoFrame.dlc = ((frame.data.bytes[0] & 0x0f) << 8) | frame.data.bytes[1];
 							for(i = 2; i < 8; i++)
 								isoFrame.data[i-2] = frame.data.bytes[i];
+							isoFrame.dataReceived += 6;
+
+							unsigned char buf[3];
+							buf[0] = 0x30; // Flow control
+							buf[1] = 0x00; // Unlimited blocks
+							buf[2] = 0x00; // With no spacing needed
+							CAN_send(CAN_UDS_cfg.outId, 3, buf);
 							break;
 						case 0x0:
 							isoFrame.dlc = frame.data.bytes[0];
@@ -49,8 +57,14 @@ static void CAN_UDS_rx_task() {
 					uint8_t index = frame.data.bytes[0] & 0xf;
 					uint8_t indexShouldBe = (isoFrame.lastIndex+1) & 0xf;
 					
-					if(index != indexShouldBe)
+					if(index != indexShouldBe) {
+						unsigned char buf[4];
+						buf[0] = index; // Reject
+						buf[1] = ctrl;
+						buf[2] = indexShouldBe; // Conditions not correct
+						CAN_ISO_send(2, 3, buf);
 						CAN_ISO_static_frame_invalidate(&isoFrame);
+					}
 
 					if(ctrl != 2 || isoFrame.lastFrame.id == 0x800) // Second condition is checking if frame was invalidated
 						continue; // Makes sure flow control (ctrl=3) does not get parsed
@@ -74,7 +88,6 @@ static void CAN_UDS_rx_task() {
 }
 
 static void CAN_UDS_ISO_task() {
-	int i;
 	CAN_ISO_frame_t frame;
 	esp_ota_handle_t otaHandle;
 	const esp_partition_t* nextPartition = NULL;
@@ -103,6 +116,34 @@ static void CAN_UDS_ISO_task() {
 					CAN_stop();
 					wait(100);
 					esp_restart();
+					break;
+				case 0x22: // Read Data By Identifier (DID)
+					if(uploading) {
+						buf[0] = 0x7f; // Reject
+						buf[1] = sid;
+						buf[2] = 0x22; // Conditions not correct
+						CAN_ISO_send(CAN_UDS_cfg.outId, 3, buf);
+						break;
+					}
+
+					switch(frame.data[1] << 8 | frame.data[2]) {
+						case 0x0000: { // Module Information
+							char version[148];
+							sprintf(version + 3, "{\"n\":\"%s\",\"v\":\"%s\"}", CAN_UDS_cfg.name, CAN_UDS_cfg.version);
+							version[0] = sid + 0x40; // Response ID
+							version[1] = frame.data[1];
+							version[2] = frame.data[2];
+							int msglen = strlen((const char*) (version+3)) + 3;
+							CAN_ISO_send(CAN_UDS_cfg.outId, msglen, (const unsigned char*) version);
+							break;
+						}
+						default:
+							buf[0] = 0x7f; // Reject
+							buf[1] = sid;
+							buf[2] = 0x31; // Request out of range
+							CAN_ISO_send(CAN_UDS_cfg.outId, 3, buf);
+							break;
+					}
 					break;
 				case 0x23: // Read Memory By Address
 					if(frame.dlc != 6) {
@@ -140,8 +181,9 @@ static void CAN_UDS_ISO_task() {
 						buf[0] = 0x7f; // Reject
 						buf[1] = sid;
 						buf[2] = 0x10; // General reject
-						buf[3] = err;
-						CAN_ISO_send(CAN_UDS_cfg.outId, 4, buf);
+						buf[3] = err >> 8;
+						buf[4] = err;
+						CAN_ISO_send(CAN_UDS_cfg.outId, 5, buf);
 						break;
 					}
 
@@ -233,29 +275,6 @@ static void CAN_UDS_ISO_task() {
 	}
 }
 
-static void CAN_UDS_broadcast_task() {
-	unsigned char toSend[5];
-	char version[145];
-	while(!stop) {
-		wait(CAN_UDS_BROADCAST_RATE);
-
-		toSend[0] = CAN_UDS_cfg.outId >> 8;
-		toSend[1] = CAN_UDS_cfg.outId;
-		toSend[2] = CAN_UDS_cfg.inId >> 8;
-		toSend[3] = CAN_UDS_cfg.inId;
-		toSend[4] = CAN_UDS_cfg.broadcastId >> 8;
-		toSend[5] = CAN_UDS_cfg.broadcastId;
-		toSend[6] = uploading | (updated << 1);
-		CAN_send(CAN_UDS_BROADCAST_ARB, 7, toSend);
-
-		if(uploading)
-			continue; // Don't transmit version while uploading
-
-		sprintf(version, "{\"n\":\"%s\",\"v\":\"%s\"}", CAN_UDS_cfg.name, CAN_UDS_cfg.version);
-		CAN_ISO_str_send(CAN_UDS_cfg.broadcastId, version);
-	}
-}
-
 int CAN_UDS_init() {
 	stop = false;
 
@@ -263,7 +282,6 @@ int CAN_UDS_init() {
 	if(isoQueue == pdFALSE)
 		return -1; // Queue could not be created
 
-	xTaskCreate(CAN_UDS_broadcast_task, "CAN_UDS_broadcast_task", 1024 * 4, NULL, 7, NULL);
 	xTaskCreate(CAN_UDS_rx_task, "CAN_UDS_rx_task", 1024 * 6, NULL, 7, NULL);
 	xTaskCreate(CAN_UDS_ISO_task, "CAN_UDS_ISO_task", 1024 * 3, NULL, 6, NULL);
 	return 0;
