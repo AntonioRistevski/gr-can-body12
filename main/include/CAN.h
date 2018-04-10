@@ -32,7 +32,7 @@
 #include "CAN_config.h"
 
 #define CAN_PADDING_BYTE (0xAA)
-#define CAN_ISO_WAIT_TIME (20)
+#define CAN_ISO_WAIT_TIME (0)
 
 /**
  * \brief CAN frame type (standard/extended)
