@@ -117,6 +117,12 @@ int CAN_write_frame(const CAN_frame_t* p_frame){
 	if(xSemaphoreTake(asyncMutex, portMAX_DELAY) == pdFALSE)
 		return -1; // Timed out
 
+	portMUX_TYPE mux;
+	vPortCPUInitializeMutex(&mux);
+	if(!vPortCPUAcquireMutexTimeout(&mux, portMUX_NO_TIMEOUT))
+		return -2; // Could not aquire mux
+	taskENTER_CRITICAL(&mux);
+
 	//write frame information record
 	MODULE_CAN->MBX_CTRL.FCTRL.FIR.U = p_frame->FIR.U;
 	MODULE_CAN->MBX_CTRL.FCTRL.FIR.B.DLC = p_frame->dlc;
@@ -141,6 +147,8 @@ int CAN_write_frame(const CAN_frame_t* p_frame){
 
 	// Transmit frame
 	MODULE_CAN->CMR.B.TR=1;
+	taskEXIT_CRITICAL(&mux);
+	vPortCPUReleaseMutex(&mux);
 	xSemaphoreGive(asyncMutex);
 	return 0;
 }
@@ -166,6 +174,8 @@ int CAN_send(int id, int dlc, unsigned char data[]) {
 	CAN_frame_t send;
 	send.FIR.B.FF = CAN_frame_std;
 	send.FIR.B.RTR = 0;
+	send.FIR.B.reserved_24 = 0;
+	send.FIR.B.unknown_2 = 0;
 	send.id = id;
 	send.dlc = dlc;
 	for(int i = 0; i < dlc; i++)
@@ -180,6 +190,8 @@ int CAN_ISO_send(const uint16_t id, const uint16_t dlc, const unsigned char data
 	CAN_frame_t send;
 	send.FIR.B.FF = CAN_frame_std;
 	send.FIR.B.RTR = 0;
+	send.FIR.B.reserved_24 = 0;
+	send.FIR.B.unknown_2 = 0;
 	send.id = id;
 	send.dlc = 8;
 	for(i = 0; i < 8; i++)
