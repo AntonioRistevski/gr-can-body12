@@ -222,7 +222,7 @@ void app_main() {
 	initCAN();
 	initCAN_UDS();
 
-	xTaskCreate(uart_read_task, "uart_read_task", 1024*2, NULL, 10, NULL);
+	xTaskCreate(uart_read_task, "uart_read_task", 1024 + UART_RX_BUF_SZ, NULL, 10, NULL);
 	xTaskCreate(uart_action_task, "uart_action_task", 1024*6, NULL, 8, NULL);
 	xTaskCreate(can_rx_task, "can_rx_task", 1024*2, NULL, 9, NULL);
 	//xTaskCreate(ctrl_task, "ctrl_task", 1024, NULL, 7, NULL);
