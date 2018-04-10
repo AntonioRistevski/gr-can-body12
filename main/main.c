@@ -13,7 +13,7 @@
 #define UART_USB_RXD    	(GPIO_NUM_3)
 #define UART_SPEED      	(921600)
 #define UART_TX_BUF_SZ  	(0)
-#define UART_RX_BUF_SZ  	(256)
+#define UART_RX_BUF_SZ  	(8128)
 #define UART_EVT_BUF_SZ		(128)
 #define UART_LINE_BUF_SZ	(512)
 
@@ -87,32 +87,36 @@ bool dataIsValid(CAN_int16_data_t* data) {
 
 static void uart_read_task() {
 	uart_event_t event;
-	uint8_t data[UART_LINE_BUF_SZ];
+	uint8_t data[UART_RX_BUF_SZ];
 	uint16_t dataAvailable = 0;
 	while(true) {
 		if(xQueueReceive(uartEventQueue, &event, portMAX_DELAY) == pdTRUE) {
 			switch(event.type) {
-				case UART_DATA: {
-					// This is happening any time a byte is received over UART
-					bool hasEndl = false;
-					int space = UART_LINE_BUF_SZ - dataAvailable;
-					// First we read into the data buffer
+				case UART_DATA:
+				{
+					int endlCount = 0;
+					int space = UART_RX_BUF_SZ - dataAvailable;
 					int len = uart_read_bytes(UART_NUM_1, data + dataAvailable, event.size > space ? space : event.size, portMAX_DELAY);
 					dataAvailable += len;
-					// Then we look for the endline
 					for(uint8_t* d = data + dataAvailable - len; d < data + dataAvailable; d++) {
-						if(*d == '\r')
-							*d = '\n';
 						if(*d == '\n')
-							hasEndl = true;
+							endlCount++;
 					}
-					// If we got the endline, copy the string into the queue, and it will be handled by uart_action_task
-					if(hasEndl) {
-						*(data + dataAvailable - 1) = 0;
-						int slen = strlen((const char*) data);
-						char* line = malloc(slen + 1);
-						strcpy(line, (const char*) data);
-						xQueueSend(uartLineQueue, &line, portMAX_DELAY);
+					if(endlCount != 0) {
+						char* part = strtok((const char*) data, "\n");
+						while(endlCount > 0) {
+							int slen = strlen(part);
+							char* line = pvPortMalloc(slen+1);
+							strcpy(line, part);
+							xQueueSend(uartLineQueue, &line, portMAX_DELAY);
+							endlCount--;
+							part = strtok(NULL, "\n");
+						}
+
+						data[0] = 0;
+						if(part != NULL)
+							strcpy((const char*) data, part);
+
 						dataAvailable = 0;
 					}
 					break;
