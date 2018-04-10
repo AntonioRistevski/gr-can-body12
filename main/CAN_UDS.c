@@ -94,7 +94,9 @@ static void CAN_UDS_ISO_task() {
 	size_t updateSize = NULL;
 	size_t bytesWritten = 0;
 	esp_err_t err;
-	uint8_t buf[260];
+	uint8_t buf[1024];
+	int lastUpdateIndex = -1;
+	int lastBytes = -1;
 	while(!stop) {
 		if(xQueueReceive(isoQueue, &frame, portMAX_DELAY) == pdTRUE) {
 			uint8_t sid = frame.data[0];
@@ -173,6 +175,8 @@ static void CAN_UDS_ISO_task() {
 						break;
 					}
 
+					lastBytes = -1;
+
 					bytesWritten = 0;
 					updateSize = (frame.data[1] << 24 | frame.data[2] << 16 | frame.data[3] << 8 | frame.data[4]);
 					nextPartition = esp_ota_get_next_update_partition(NULL);
@@ -191,6 +195,8 @@ static void CAN_UDS_ISO_task() {
 					buf[1] = 0x00; // 16-bit block size
 					buf[2] = 0xff; // Currently 255 bytes per block
 					CAN_ISO_send(CAN_UDS_cfg.outId, 3, buf);
+
+					vTaskPrioritySet(NULL, 8);
 					break;
 				case 0x36: // Transfer Data
 					if(!uploading) {
@@ -201,15 +207,42 @@ static void CAN_UDS_ISO_task() {
 						break;
 					}
 
-					uint16_t bytes = frame.dlc - 1;
-					err = esp_ota_write(otaHandle, frame.data+1, bytes);
+					int indexShouldBe = (lastUpdateIndex + 1) & 0xff;
+					if(frame.data[1] != indexShouldBe) {
+						buf[0] = 0x7f; // Reject
+						buf[1] = sid;
+						buf[2] = 0x10; // General reject
+						buf[3] = frame.data[1];
+						buf[4] = indexShouldBe;
+						buf[5] = 0xff; // Index out of order
+						CAN_ISO_send(CAN_UDS_cfg.outId, 6, buf);
+						break;
+					}
+					lastUpdateIndex = frame.data[1];
+
+					uint16_t bytes = frame.dlc - 2;
+					if(lastBytes == -1)
+						lastBytes = bytes;
+					if(bytes != lastBytes && bytesWritten + bytes < updateSize) {
+						buf[0] = 0x7f; // Reject
+						buf[1] = sid;
+						buf[2] = 0x10; // General reject
+						buf[3] = bytes;
+						buf[4] = lastBytes;
+						buf[5] = 0xfe; // Wrong size
+						CAN_ISO_send(CAN_UDS_cfg.outId, 6, buf);
+						break;
+					}
+					err = esp_ota_write(otaHandle, frame.data+2, bytes);
 					if(err != ESP_OK) {
 						buf[0] = 0x7f; // Reject
 						buf[1] = sid;
 						buf[2] = 0x10; // General reject
-						buf[3] = err;
-						buf[4] = 0x00; // esp_ota_write
-						CAN_ISO_send(CAN_UDS_cfg.outId, 5, buf);
+						buf[3] = err >> 16;
+						buf[4] = err >> 8;
+						buf[5] = err;
+						buf[6] = 0x00; // esp_ota_write
+						CAN_ISO_send(CAN_UDS_cfg.outId, 7, buf);
 						break;
 					}
 
@@ -220,9 +253,11 @@ static void CAN_UDS_ISO_task() {
 							buf[0] = 0x7f; // Reject
 							buf[1] = sid;
 							buf[2] = 0x10; // General reject
-							buf[3] = err;
-							buf[4] = 0x01; // esp_ota_end
-							CAN_ISO_send(CAN_UDS_cfg.outId, 5, buf);
+							buf[3] = err >> 16;
+							buf[4] = err >> 8;
+							buf[5] = err;
+							buf[6] = 0x01; // esp_ota_end
+							CAN_ISO_send(CAN_UDS_cfg.outId, 7, buf);
 							break;
 						}
 
@@ -231,9 +266,11 @@ static void CAN_UDS_ISO_task() {
 							buf[0] = 0x7f; // Reject
 							buf[1] = sid;
 							buf[2] = 0x10; // General reject
-							buf[3] = err;
-							buf[4] = 0x02; // esp_ota_set_boot_partition
-							CAN_ISO_send(CAN_UDS_cfg.outId, 5, buf);
+							buf[3] = err >> 16;
+							buf[4] = err >> 8;
+							buf[5] = err;
+							buf[6] = 0x02; // esp_ota_set_boot_partition
+							CAN_ISO_send(CAN_UDS_cfg.outId, 7, buf);
 							break;
 						}
 
@@ -278,12 +315,12 @@ static void CAN_UDS_ISO_task() {
 int CAN_UDS_init() {
 	stop = false;
 
-	isoQueue = xQueueCreate(10, sizeof(CAN_ISO_frame_t));
+	isoQueue = xQueueCreate(15, sizeof(CAN_ISO_frame_t));
 	if(isoQueue == pdFALSE)
 		return -1; // Queue could not be created
 
 	xTaskCreate(CAN_UDS_rx_task, "CAN_UDS_rx_task", 1024 * 6, NULL, 7, NULL);
-	xTaskCreate(CAN_UDS_ISO_task, "CAN_UDS_ISO_task", 1024 * 3, NULL, 6, NULL);
+	xTaskCreate(CAN_UDS_ISO_task, "CAN_UDS_ISO_task", 1024 * 3, NULL, 8, NULL);
 	return 0;
 }
 
