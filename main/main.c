@@ -68,10 +68,10 @@ void initCAN() {
 }
 
 void initCAN_UDS() {
-	CAN_UDS_cfg.outId = 0x701;
-	CAN_UDS_cfg.inId = 0x702;
+	CAN_UDS_cfg.outId = 0x711;
+	CAN_UDS_cfg.inId = 0x712;
 	CAN_UDS_cfg.queue = xQueueCreate(CAN_QUEUE_SZ, sizeof(CAN_frame_t));
-	strcpy(CAN_UDS_cfg.name, "Example Module");
+	strcpy(CAN_UDS_cfg.name, "Dashboard Module");
 	strcpy(CAN_UDS_cfg.version, GRVERSION);
 	CAN_UDS_init();
 }
@@ -177,6 +177,10 @@ static void can_rx_task() {
 		if(xQueueReceive(CAN_cfg.rx_queue, &frame, portMAX_DELAY) == pdTRUE) {
 			xQueueSend(CAN_UDS_cfg.queue, &frame, portMAX_DELAY); // Pass messages through to the updater
 			switch(frame.id) {
+				// when in neutral
+				// starter status
+				// engine status
+				// engine temperature
 				case 0x5F0:
 					if(frame.dlc == 8) { // Probably check the DLC to make sure you're not getting garbage
 						rpm.data = ((frame.data.bytes[6]) << 8) | frame.data.bytes[7]; // This is where you want to grab any data from the frame
@@ -189,14 +193,60 @@ static void can_rx_task() {
 
 static void ctrl_task() {
 	gpio_config_t io_conf;
-    io_conf.intr_type = GPIO_PIN_INTR_DISABLE;
-    io_conf.mode = GPIO_MODE_INPUT;
-    io_conf.pin_bit_mask = ((1ULL<<0));
-    io_conf.pull_down_en = 0;
-    io_conf.pull_up_en = 1;
-    gpio_config(&io_conf);
+
+	// GPIO 0 is starter button in (active low)
+	io_conf.intr_type = GPIO_PIN_INTR_DISABLE;
+	io_conf.mode = GPIO_MODE_INPUT;
+	io_conf.pin_bit_mask = GPIO_SEL_0;
+	io_conf.pull_down_en = 0;
+	io_conf.pull_up_en = 1;
+	if(gpio_config(&io_conf) != ESP_OK)
+		println("Error setting up GPIO 0");
+
+	// GPIO 2 is starter button LED (active high)
+	io_conf.mode = GPIO_MODE_OUTPUT;
+	io_conf.pin_bit_mask = GPIO_SEL_2;
+	io_conf.pull_down_en = 1;
+	io_conf.pull_up_en = 0;
+	if(gpio_config(&io_conf) != ESP_OK)
+		println("Error setting up GPIO 2");
+
+	// GPIO 32 is fuel switch in (active low)
+	io_conf.mode = GPIO_MODE_INPUT;
+	io_conf.pin_bit_mask = GPIO_SEL_32;
+	io_conf.pull_down_en = 0;
+	io_conf.pull_up_en = 1;
+	if(gpio_config(&io_conf) != ESP_OK)
+		println("Error setting up GPIO 32");
+
+	// GPIO 34 is fan override switch in (active low)
+	io_conf.mode = GPIO_MODE_INPUT;
+	io_conf.pin_bit_mask = GPIO_SEL_34;
+	io_conf.pull_down_en = 0;
+	io_conf.pull_up_en = 1;
+	if(gpio_config(&io_conf) != ESP_OK)
+		println("Error setting up GPIO 34");
+
+	bool starter = false;
+	bool fuel = false;
+	bool fan = false;
+	bool fanOverride = false;
+
+	bool starterLight = false;
+
 	unsigned char toSend[1];
 	while(true) {
+		starter = (!gpio_get_level(GPIO_NUM_0));
+		fuel = (!gpio_get_level(GPIO_NUM_32));
+		fanOverride = (!gpio_get_level(GPIO_NUM_34));
+
+		if(fanOverride)
+			fan = true;
+		else {
+			// TODO auto control
+			fan = false;
+		}
+
 		// if(dataIsValid(&rpm))
 		// 	toSend[0] = (rpm.data > 4000 ? 0xff : 0x0f);
 		// else
@@ -207,9 +257,22 @@ static void ctrl_task() {
 		// 0x0f is sent if RPM < 4000
 		// 0xff is sent if RPM >= 4000
 
-		toSend[0] = (!gpio_get_level(GPIO_NUM_0)) & 0x01;
+		toSend[0] = starter;
+		toSend[0] |= fuel << 1;
+		toSend[0] |= fan << 2;
 		if(transmit)
 			CAN_send(0x130, 1, toSend);
+
+		char buf[10];
+		buf[0] = starter ? 'S' : 's';
+		buf[1] = fuel ? 'F' : 'f';
+		buf[2] = fan ? 'C' : 'c';
+		buf[3] = '\n';
+		buf[4] = 0;
+		print(buf);
+
+		gpio_set_level(GPIO_NUM_2, starterLight);
+		starterLight = !starterLight;
 
 		wait(10); // This control loop will be run at 100Hz
 	}
@@ -224,5 +287,5 @@ void app_main() {
 	xTaskCreate(uart_read_task, "uart_read_task", 1024 + UART_RX_BUF_SZ, NULL, 10, NULL);
 	xTaskCreate(uart_action_task, "uart_action_task", 1024*6, NULL, 8, NULL);
 	xTaskCreate(can_rx_task, "can_rx_task", 1024*2, NULL, 9, NULL);
-	//xTaskCreate(ctrl_task, "ctrl_task", 1024, NULL, 7, NULL);
+	xTaskCreate(ctrl_task, "ctrl_task", 1024, NULL, 7, NULL);
 }

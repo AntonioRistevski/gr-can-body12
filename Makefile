@@ -3,7 +3,7 @@
 # project subdirectory.
 #
 
-PROJECT_NAME := canopener
+PROJECT_NAME := gr-can-dashboard
 
 GIT_VERSION := $(shell git describe --abbrev=7 --dirty --always --tags)
 CFLAGS += -DGRVERSION=\"$(GIT_VERSION)\"
