@@ -2,7 +2,6 @@
 #define __DRIVERS_CAN_UDS__
 
 #define CAN_UDS_BROADCAST_ARB 0x700
-#define CAN_UDS_BROADCAST_RATE (2500)
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
@@ -11,7 +10,6 @@
 typedef struct {
     uint16_t 		inId;     				/**< \brief Unique Arbitration ID for Module (Module Listens) */
 	uint16_t 		outId;     				/**< \brief Unique Arbitration ID for Module (Module Speaks) */
-	uint16_t 		broadcastId;	  		/**< \brief Unique Arbitration ID for Module (Module Broadcasts) */
 	QueueHandle_t	queue;					/**< \brief CAN RX Queue */
 	char			name[64];				/**< \brief Module Name */
 	char			version[64];			/**< \brief Version Number */
