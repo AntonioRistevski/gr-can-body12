@@ -307,7 +307,7 @@ static void CAN_UDS_ISO_task() {
 					CAN_ISO_send(CAN_UDS_cfg.outId, 3, buf);
 			}
 
-			free(frame.data); // Always free the data malloc'd by CAN_ISO_frame_minify
+			vPortFree(frame.data); // Always free the data malloc'd by CAN_ISO_frame_minify
 		}
 	}
 }

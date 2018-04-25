@@ -242,7 +242,7 @@ int CAN_ISO_str_send(const uint16_t id, const char* str) {
 void CAN_ISO_frame_minify(const CAN_ISO_static_frame_t* src, CAN_ISO_frame_t* dest) {
 	dest->id = src->id;
 	dest->dlc = src->dlc;
-	dest->data = malloc(dest->dlc);
+	dest->data = pvPortMalloc(dest->dlc); // USES MALLOC!!!
 	memcpy(dest->data, src->data, dest->dlc);
 }
 
