@@ -22,18 +22,30 @@
 #define CAN_QUEUE_SZ 		(35)
 #define CAN_SPEED			(CAN_SPEED_500KBPS)
 
+#define STARTER_LIGHT_STARTING_PERIOD (65)
+#define STARTER_LIGHT_DISALLOWED_PERIOD (500)
+#define STARTER_LIGHT_ALLOWED_PERIOD (-1)
+#define STARTER_RUN_ON_TIME (5000)
+
 typedef struct {
 	int16_t data;
 	unsigned long lastUpdate;
 	unsigned long invalidAfter;
 } CAN_int16_data_t;
 
+typedef enum { CANCEL_DISALLOWED, CANCEL_ALLOWED, CANCEL_AFTER_DEPRESS } PushCancelState;
+
 QueueHandle_t uartEventQueue, uartLineQueue;
 CAN_device_t CAN_cfg; // Name cannot change, extern reference
 CAN_UDS_cfg_t CAN_UDS_cfg; // Name cannot change, extern reference
 
 CAN_int16_data_t rpm;
-bool transmit = true;
+bool transmit = false;
+
+bool starter = false;
+bool fuel = false;
+bool fan = false;
+bool fanOverride = false;
 
 static void uart_read_task();
 static void uart_action_task();
@@ -43,6 +55,43 @@ static void ctrl_task();
 void initVariables() {
 	rpm.lastUpdate = 0;
 	rpm.invalidAfter = 250; // After 250ms, the RPM data will be considered invalid
+}
+
+void initGPIO() {
+	gpio_config_t io_conf;
+
+	// GPIO 0 is starter button in (active low)
+	io_conf.intr_type = GPIO_PIN_INTR_DISABLE;
+	io_conf.mode = GPIO_MODE_INPUT;
+	io_conf.pin_bit_mask = GPIO_SEL_0;
+	io_conf.pull_down_en = 0;
+	io_conf.pull_up_en = 1;
+	if(gpio_config(&io_conf) != ESP_OK)
+		println("Error setting up GPIO 0");
+
+	// GPIO 2 is starter button LED (active high)
+	io_conf.mode = GPIO_MODE_OUTPUT;
+	io_conf.pin_bit_mask = GPIO_SEL_2;
+	io_conf.pull_down_en = 1;
+	io_conf.pull_up_en = 0;
+	if(gpio_config(&io_conf) != ESP_OK)
+		println("Error setting up GPIO 2");
+
+	// GPIO 32 is fuel switch in (active low)
+	io_conf.mode = GPIO_MODE_INPUT;
+	io_conf.pin_bit_mask = GPIO_SEL_32;
+	io_conf.pull_down_en = 0;
+	io_conf.pull_up_en = 1;
+	if(gpio_config(&io_conf) != ESP_OK)
+		println("Error setting up GPIO 32");
+
+	// GPIO 33 is fan override switch in (active low)
+	io_conf.mode = GPIO_MODE_INPUT;
+	io_conf.pin_bit_mask = GPIO_SEL_33;
+	io_conf.pull_down_en = 0;
+	io_conf.pull_up_en = 1;
+	if(gpio_config(&io_conf) != ESP_OK)
+		println("Error setting up GPIO 33");
 }
 
 void initUART() {
@@ -102,7 +151,7 @@ static void uart_read_task() {
 							endlCount++;
 					}
 					if(endlCount != 0) {
-						char* part = strtok((const char*) data, "\n");
+						char* part = strtok((char*) data, "\n");
 						while(endlCount > 0) {
 							int slen = strlen(part);
 							char* line = pvPortMalloc(slen+1);
@@ -114,7 +163,7 @@ static void uart_read_task() {
 
 						data[0] = 0;
 						if(part != NULL)
-							strcpy((const char*) data, part);
+							strcpy((char*) data, part);
 
 						dataAvailable = 0;
 					}
@@ -191,101 +240,95 @@ static void can_rx_task() {
 	}
 }
 
-static void ctrl_task() {
-	gpio_config_t io_conf;
-
-	// GPIO 0 is starter button in (active low)
-	io_conf.intr_type = GPIO_PIN_INTR_DISABLE;
-	io_conf.mode = GPIO_MODE_INPUT;
-	io_conf.pin_bit_mask = GPIO_SEL_0;
-	io_conf.pull_down_en = 0;
-	io_conf.pull_up_en = 1;
-	if(gpio_config(&io_conf) != ESP_OK)
-		println("Error setting up GPIO 0");
-
-	// GPIO 2 is starter button LED (active high)
-	io_conf.mode = GPIO_MODE_OUTPUT;
-	io_conf.pin_bit_mask = GPIO_SEL_2;
-	io_conf.pull_down_en = 1;
-	io_conf.pull_up_en = 0;
-	if(gpio_config(&io_conf) != ESP_OK)
-		println("Error setting up GPIO 2");
-
-	// GPIO 32 is fuel switch in (active low)
-	io_conf.mode = GPIO_MODE_INPUT;
-	io_conf.pin_bit_mask = GPIO_SEL_32;
-	io_conf.pull_down_en = 0;
-	io_conf.pull_up_en = 1;
-	if(gpio_config(&io_conf) != ESP_OK)
-		println("Error setting up GPIO 32");
-
-	// GPIO 34 is fan override switch in (active low)
-	io_conf.mode = GPIO_MODE_INPUT;
-	io_conf.pin_bit_mask = GPIO_SEL_34;
-	io_conf.pull_down_en = 0;
-	io_conf.pull_up_en = 1;
-	if(gpio_config(&io_conf) != ESP_OK)
-		println("Error setting up GPIO 34");
-
-	bool starter = false;
-	bool fuel = false;
-	bool fan = false;
-	bool fanOverride = false;
-
-	bool starterLight = false;
-
+static void can_tx_task() {
 	unsigned char toSend[1];
+
 	while(true) {
-		starter = (!gpio_get_level(GPIO_NUM_0));
-		fuel = (!gpio_get_level(GPIO_NUM_32));
-		fanOverride = (!gpio_get_level(GPIO_NUM_34));
-
-		if(fanOverride)
-			fan = true;
-		else {
-			// TODO auto control
-			fan = false;
-		}
-
-		// if(dataIsValid(&rpm))
-		// 	toSend[0] = (rpm.data > 4000 ? 0xff : 0x0f);
-		// else
-		// 	toSend[0] = 0x00;
-
-		// This control loop is sending 0x00, 0x0f, and 0xff to ID 0x130
-		// 0x00 is sent if no valid data exists
-		// 0x0f is sent if RPM < 4000
-		// 0xff is sent if RPM >= 4000
-
 		toSend[0] = starter;
 		toSend[0] |= fuel << 1;
 		toSend[0] |= fan << 2;
 		if(transmit)
 			CAN_send(0x130, 1, toSend);
 
-		char buf[10];
-		buf[0] = starter ? 'S' : 's';
-		buf[1] = fuel ? 'F' : 'f';
-		buf[2] = fan ? 'C' : 'c';
-		buf[3] = '\n';
-		buf[4] = 0;
-		print(buf);
-
-		gpio_set_level(GPIO_NUM_2, starterLight);
-		starterLight = !starterLight;
+		// if(dataIsValid(&rpm))
+		// 	toSend[0] = (rpm.data > 4000 ? 0xff : 0x0f);
+		// else
+		// 	toSend[0] = 0x00;
 
 		wait(10); // This control loop will be run at 100Hz
+	}
+}
+
+static void ctrl_task() {
+	bool starterButton = false;
+	bool starterLight = false;
+	PushCancelState starterCancel = CANCEL_DISALLOWED;
+	int starterLightPeriod = STARTER_LIGHT_DISALLOWED_PERIOD;
+	int starterLightTime = 0;
+	int starterTime = -1;
+	int starterRunOnTime = STARTER_RUN_ON_TIME;
+
+	while(true) {
+		starterButton = !gpio_get_level(GPIO_NUM_0);
+		fuel = (!gpio_get_level(GPIO_NUM_32));
+		fanOverride = (!gpio_get_level(GPIO_NUM_33));
+
+		if(starterButton && !starter) {
+			starterTime = 0;
+			starter = true;
+			starterCancel = CANCEL_DISALLOWED;
+		}
+		if(!starterButton && starter && starterCancel == CANCEL_DISALLOWED)
+			starterCancel = CANCEL_ALLOWED;
+		if(starterTime >= starterRunOnTime || (starterButton && starterCancel == CANCEL_ALLOWED))
+			starterCancel = CANCEL_AFTER_DEPRESS;
+		if(!starterButton&& starterCancel == CANCEL_AFTER_DEPRESS) {
+			starterCancel = CANCEL_DISALLOWED;
+			starter = false;
+			starterTime = -1;
+		}
+
+		if(starter && starterLightPeriod != STARTER_LIGHT_STARTING_PERIOD) {
+			starterLightPeriod = STARTER_LIGHT_STARTING_PERIOD;
+			starterLight = true;
+			starterLightTime = 0;
+		} else if (!starter && starterLightPeriod == STARTER_LIGHT_STARTING_PERIOD) {
+			starterLightPeriod = STARTER_LIGHT_DISALLOWED_PERIOD;
+			starterLight = true;
+			starterLightTime = 0;
+		}
+
+		if(starterLightPeriod > 0 && starterLightTime >= starterLightPeriod) {
+			starterLight = !starterLight;
+			starterLightTime = 0;
+		}
+		gpio_set_level(GPIO_NUM_2, starterLight);
+
+		if(fanOverride)
+			fan = !starter;
+		else {
+			// TODO auto control
+			fan = false;
+		}
+
+		if(starterTime >= 0)
+			starterTime += 5;
+		if(starterLightPeriod >= 0) // Set period to -1 to hold state
+			starterLightTime += 5;
+		wait(5); // This control loop will be run at 200Hz
 	}
 }
 
 void app_main() {
 	initVariables();
 	initUART();
+	initGPIO();
 	initCAN();
 	initCAN_UDS();
 
 	xTaskCreate(uart_read_task, "uart_read_task", 1024 + UART_RX_BUF_SZ, NULL, 10, NULL);
 	xTaskCreate(uart_action_task, "uart_action_task", 1024*6, NULL, 8, NULL);
 	xTaskCreate(can_rx_task, "can_rx_task", 1024*2, NULL, 9, NULL);
-	xTaskCreate(ctrl_task, "ctrl_task", 1024, NULL, 7, NULL);
+	xTaskCreate(can_tx_task, "can_tx_task", 1024, NULL, 9, NULL);
+	xTaskCreate(ctrl_task, "ctrl_task", 1024, NULL, 10, NULL);
 }
