@@ -5,6 +5,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/uart.h"
+#include "rom/ets_sys.h"
 
 unsigned long millis() {
 	return xTaskGetTickCount() * portTICK_PERIOD_MS;
@@ -12,6 +13,10 @@ unsigned long millis() {
 
 void wait(unsigned int ms) {
 	vTaskDelay(ms / portTICK_PERIOD_MS);
+}
+
+void waitus(unsigned int us) {
+	ets_delay_us(us);
 }
 
 void print(const char* str) {

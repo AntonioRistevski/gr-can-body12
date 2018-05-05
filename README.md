@@ -1,4 +1,4 @@
-# CAN Node Example
+# CAN Body Control Module
 by Paul Hollinsky
 
-An example of a CAN Node for Grizzlies Racing. Not done yet.
+Body control module for Grizzlies Racing. Runs the fan, fuel pump, starter, and brake light. Gets the value of the neutral sense.
