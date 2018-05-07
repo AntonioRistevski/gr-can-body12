@@ -23,6 +23,12 @@
 #define CAN_SPEED			(CAN_SPEED_500KBPS)
 
 typedef struct {
+	int16_t data;
+	unsigned long lastUpdate;
+	unsigned long invalidAfter;
+} CAN_int16_data_t;
+
+typedef struct {
 	bool data;
 	unsigned long lastUpdate;
 	unsigned long invalidAfter;
@@ -38,6 +44,8 @@ CAN_bool_data_t starter;
 CAN_bool_data_t fuel;
 CAN_bool_data_t fan;
 CAN_bool_data_t brakeLight;
+CAN_int16_data_t rpm;
+CAN_int16_data_t fuelPressure;
 bool neutral = false;
 
 static void uart_read_task();
@@ -46,14 +54,24 @@ static void can_rx_task();
 static void ctrl_task();
 
 void initVariables() {
-	starter.lastUpdate = false;
+	starter.data = false;
+	starter.lastUpdate = 0;
 	starter.invalidAfter = 250;
-	fuel.lastUpdate = false;
+	fuel.data = false;
+	fuel.lastUpdate = 0;
 	fuel.invalidAfter = 250;
-	fan.lastUpdate = false;
+	fan.data = false;
+	fan.lastUpdate = 0;
 	fan.invalidAfter = 250;
-	brakeLight.lastUpdate = false;
+	brakeLight.data = false;
+	brakeLight.lastUpdate = 0;
 	brakeLight.invalidAfter = 250;
+	rpm.data = 0;
+	rpm.lastUpdate = 0;
+	rpm.invalidAfter = 100;
+	fuelPressure.data = 0;
+	fuelPressure.lastUpdate = 0;
+	fuelPressure.invalidAfter = 100;
 }
 
 void initGPIO() {
@@ -130,6 +148,20 @@ void initCAN_UDS() {
 	strcpy(CAN_UDS_cfg.name, "Body Control Module");
 	strcpy(CAN_UDS_cfg.version, GRVERSION);
 	CAN_UDS_init();
+}
+
+bool i16DataIsValid(CAN_int16_data_t* data) {
+	if(data->lastUpdate == 0)
+		return false; // Data has never been updated
+	if(data->lastUpdate + data->invalidAfter < millis())
+		return false; // Data is no longer valid
+	return true;
+}
+
+int16_t i16ValueOr(CAN_int16_data_t* data, int16_t ifInvalid) {
+	if(i16DataIsValid(data))
+		return data->data;
+	return ifInvalid;
 }
 
 bool dataIsValid(CAN_bool_data_t* data) {
@@ -256,18 +288,28 @@ static void can_rx_task() {
 					break;
 				case 0x5F0:
 					if(frame.dlc == 8) { // Probably check the DLC to make sure you're not getting garbage
-						// rpm.data = ((frame.data.bytes[6]) << 8) | frame.data.bytes[7]; // This is where you want to grab any data from the frame
-						// rpm.lastUpdate = millis();
+						rpm.data = ((frame.data.bytes[6]) << 8) | frame.data.bytes[7]; // This is where you want to grab any data from the frame
+						rpm.lastUpdate = millis();
+					}
+					break;
+				case 0x5FD:
+					if(frame.dlc == 8) {
+						fuelPressure.data = (((frame.data.bytes[0]) << 8) | frame.data.bytes[1]);
+						fuelPressure.lastUpdate = millis();
 					}
 			}
 		}
 	}
 }
 
+// bool lastFuel = false;
+// uint8_t fuelFaults = 0;
 static void can_tx_task() {
 	unsigned char toSend[1];
 	while(true) {
 		toSend[0] = neutral;
+		// toSend[0] |= (lastFuel & 0x1) << 1;
+		// toSend[1] = fuelFaults;
 		if(transmit)
 			CAN_send(0x10, 1, toSend);
 
@@ -275,13 +317,26 @@ static void can_tx_task() {
 	}
 }
 
-unsigned long fanOnAt = 0;
 static void ctrl_task() {
 	while(true) {
 		neutral = !gpio_get_level(GPIO_NUM_12);
 		
 		gpio_set_level(GPIO_NUM_32, valueOr(&starter, false));
-		gpio_set_level(GPIO_NUM_33, valueOr(&fuel, true));
+		// This is a fuel pressure regulator in software if you need it
+		// float fPressure = ((float) i16ValueOr(&fuelPressure, 0)) / 10.0;
+		// if(valueOr(&fuel, (i16ValueOr(&rpm, 105) > 100))) {
+		// 	if(fPressure > 90 && lastFuel) {
+		// 		lastFuel = false;
+		// 		fuelFaults++;
+		// 	}
+		// 	if(fPressure < 80) {
+		// 		lastFuel = true;
+		// 	}
+		// 	gpio_set_level(GPIO_NUM_33, lastFuel);
+		// } else {
+		// 	gpio_set_level(GPIO_NUM_33, false);
+		// }
+		gpio_set_level(GPIO_NUM_33, valueOr(&fuel, (i16ValueOr(&rpm, 105) > 100)));
 		gpio_set_level(GPIO_NUM_25, valueOr(&fan, false));
 		gpio_set_level(GPIO_NUM_14, valueOr(&brakeLight, false));
 
