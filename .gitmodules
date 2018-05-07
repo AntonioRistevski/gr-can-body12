@@ -1,0 +1,3 @@
+[submodule "components/can"]
+	path = components/can
+	url = git@git.cpcookieman.com:grizzliesracing/esp32-candriver.git
