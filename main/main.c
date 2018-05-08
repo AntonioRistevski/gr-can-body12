@@ -302,16 +302,16 @@ static void can_rx_task() {
 	}
 }
 
-// bool lastFuel = false;
-// uint8_t fuelFaults = 0;
+bool lastFuel = false;
+uint8_t fuelFaults = 0;
 static void can_tx_task() {
-	unsigned char toSend[1];
+	unsigned char toSend[2];
 	while(true) {
 		toSend[0] = neutral;
-		// toSend[0] |= (lastFuel & 0x1) << 1;
-		// toSend[1] = fuelFaults;
+		toSend[0] |= (lastFuel & 0x1) << 1;
+		toSend[1] = fuelFaults;
 		if(transmit)
-			CAN_send(0x10, 1, toSend);
+			CAN_send(0x10, 2, toSend);
 
 		wait(10); // This control loop will be run at 100Hz
 	}
@@ -323,20 +323,20 @@ static void ctrl_task() {
 		
 		gpio_set_level(GPIO_NUM_32, valueOr(&starter, false));
 		// This is a fuel pressure regulator in software if you need it
-		// float fPressure = ((float) i16ValueOr(&fuelPressure, 0)) / 10.0;
-		// if(valueOr(&fuel, (i16ValueOr(&rpm, 105) > 100))) {
-		// 	if(fPressure > 90 && lastFuel) {
-		// 		lastFuel = false;
-		// 		fuelFaults++;
-		// 	}
-		// 	if(fPressure < 80) {
-		// 		lastFuel = true;
-		// 	}
-		// 	gpio_set_level(GPIO_NUM_33, lastFuel);
-		// } else {
-		// 	gpio_set_level(GPIO_NUM_33, false);
-		// }
-		gpio_set_level(GPIO_NUM_33, valueOr(&fuel, (i16ValueOr(&rpm, 105) > 100)));
+		float fPressure = ((float) i16ValueOr(&fuelPressure, 0)) / 10.0;
+		if(valueOr(&fuel, (i16ValueOr(&rpm, 105) > 100))) {
+			if(fPressure > 55 && lastFuel) {
+				lastFuel = false;
+				fuelFaults++;
+			}
+			if(fPressure < 46) {
+				lastFuel = true;
+			}
+			gpio_set_level(GPIO_NUM_33, lastFuel);
+		} else {
+			gpio_set_level(GPIO_NUM_33, false);
+		}
+		// gpio_set_level(GPIO_NUM_33, valueOr(&fuel, (i16ValueOr(&rpm, 105) > 100)));
 		gpio_set_level(GPIO_NUM_25, valueOr(&fan, false));
 		gpio_set_level(GPIO_NUM_14, valueOr(&brakeLight, false));
 
