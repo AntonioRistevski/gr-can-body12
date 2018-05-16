@@ -323,7 +323,7 @@ static void ctrl_task() {
 		
 		gpio_set_level(GPIO_NUM_32, valueOr(&starter, false));
 		// This is a fuel pressure regulator in software if you need it
-		float fPressure = ((float) i16ValueOr(&fuelPressure, 0)) / 10.0;
+		/*float fPressure = ((float) i16ValueOr(&fuelPressure, 0)) / 10.0;
 		if(valueOr(&fuel, (i16ValueOr(&rpm, 105) > 100))) {
 			if(fPressure > 55 && lastFuel) {
 				lastFuel = false;
@@ -335,10 +335,10 @@ static void ctrl_task() {
 			gpio_set_level(GPIO_NUM_33, lastFuel);
 		} else {
 			gpio_set_level(GPIO_NUM_33, false);
-		}
-		// gpio_set_level(GPIO_NUM_33, valueOr(&fuel, (i16ValueOr(&rpm, 105) > 100)));
+		}	*/
+		gpio_set_level(GPIO_NUM_33, valueOr(&fuel, (i16ValueOr(&rpm, 105) > 100)));
 		gpio_set_level(GPIO_NUM_25, valueOr(&fan, false));
-		gpio_set_level(GPIO_NUM_14, valueOr(&brakeLight, false));
+		gpio_set_level(GPIO_NUM_14, valueOr(&brakeLight, false));	//valueOr(&brakeLight, false)
 
 		wait(5); // This control loop will be run at 200Hz
 	}
