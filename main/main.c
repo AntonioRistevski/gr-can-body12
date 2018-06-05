@@ -4,6 +4,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/uart.h"
+#include "driver/adc.h"
+#include "esp_adc_cal.h"
 
 #include "CAN.h"
 #include "CAN_UDS.h"
@@ -37,6 +39,7 @@ typedef struct {
 QueueHandle_t uartEventQueue, uartLineQueue;
 CAN_device_t CAN_cfg; // Name cannot change, extern reference
 CAN_UDS_cfg_t CAN_UDS_cfg; // Name cannot change, extern reference
+esp_adc_cal_characteristics_t characteristics;
 
 bool transmit = true;
 
@@ -48,10 +51,19 @@ CAN_int16_data_t rpm;
 CAN_int16_data_t fuelPressure;
 bool neutral = false;
 
+int16_t voltageX = 0;
+int16_t voltageY = 0;
+int16_t voltageZ = 0;
+
 static void uart_read_task();
 static void uart_action_task();
 static void can_rx_task();
 static void ctrl_task();
+
+
+float map(float x, float in_min, float in_max, float out_min, float out_max) {
+	return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+}
 
 void initVariables() {
 	starter.data = false;
@@ -76,6 +88,32 @@ void initVariables() {
 
 void initGPIO() {
 	gpio_config_t io_conf;
+
+	// GPIO 35 is Z - Axis | Accelerometer
+	io_conf.mode = GPIO_MODE_INPUT;
+	io_conf.pin_bit_mask = GPIO_SEL_35;
+	if(gpio_config(&io_conf) != ESP_OK)
+		println("Error setting up GPIO 35");
+
+
+
+	// GPIO 34 is Y - Axis | Accelerometer
+	io_conf.mode = GPIO_MODE_INPUT;
+	io_conf.pin_bit_mask = GPIO_SEL_35;
+	io_conf.pull_down_en = true;
+	io_conf.pull_up_en = false;
+	if(gpio_config(&io_conf) != ESP_OK)
+		println("Error setting up GPIO 35");
+
+
+	// GPIO 39 is X - Axis | Accelerometer
+	io_conf.mode = GPIO_MODE_INPUT;
+	io_conf.pin_bit_mask = GPIO_SEL_35;
+	io_conf.pull_down_en = true;
+	io_conf.pull_up_en = false;
+	if(gpio_config(&io_conf) != ESP_OK)
+		println("Error setting up GPIO 35");
+
 
 	// GPIO 32 is starter relay
 	io_conf.intr_type = GPIO_PIN_INTR_DISABLE;
@@ -117,6 +155,15 @@ void initGPIO() {
 	io_conf.pull_up_en = true;
 	if(gpio_config(&io_conf) != ESP_OK)
 		println("Error setting up GPIO 12");
+
+	// Enable ADC
+	adc_power_on();
+	adc1_config_width(ADC_WIDTH_BIT_12);						//configure precision
+	adc1_config_channel_atten(ADC1_CHANNEL_3,ADC_ATTEN_DB_11);	//and attetntuation | Channel 3 = gpio39 | 11 db = 0 to 3.9v attentuation
+	adc1_config_channel_atten(ADC1_CHANNEL_6,ADC_ATTEN_DB_11);	//and attetntuation | Channel 6 = gpio34 | 11 db = 0 to 3.9v attentuation
+	adc1_config_channel_atten(ADC1_CHANNEL_7,ADC_ATTEN_DB_11);	//and attetntuation | Channel 7 = gpio35 | 11 db = 0 to 3.9v attentuation
+	esp_adc_cal_characterize(ADC_UNIT_1, ADC_ATTEN_DB_11, ADC_WIDTH_BIT_12, 1101, &characteristics);
+
 }
 
 void initUART() {
@@ -302,18 +349,31 @@ static void can_rx_task() {
 	}
 }
 
-bool lastFuel = false;
-uint8_t fuelFaults = 0;
+//bool lastFuel = false;
+//uint8_t fuelFaults = 0;
 static void can_tx_task() {
-	unsigned char toSend[2];
-	while(true) {
-		toSend[0] = neutral;
-		toSend[0] |= (lastFuel & 0x1) << 1;
-		toSend[1] = fuelFaults;
-		if(transmit)
-			CAN_send(0x10, 2, toSend);
+	unsigned char toSend[1];
+	unsigned char accel[6];
 
-		wait(10); // This control loop will be run at 100Hz
+	while(true) {		
+		toSend[0] = neutral;
+		//toSend[0] |= (lastFuel & 0x1) << 1;
+		//toSend[1] = fuelFaults;
+		
+		if(transmit)
+			CAN_send(0x10, 1, toSend);
+		wait(5);
+
+		accel[0] = voltageX >> 8;
+		accel[1] = voltageX;
+		accel[2] = voltageY >> 8;
+		accel[3] = voltageY;
+		accel[4] = voltageZ >> 8;
+		accel[5] = voltageZ;
+
+		if(transmit)
+			CAN_send(0x380, 6, accel);
+		wait(5);
 	}
 }
 
@@ -339,6 +399,22 @@ static void ctrl_task() {
 		gpio_set_level(GPIO_NUM_33, valueOr(&fuel, (i16ValueOr(&rpm, 105) > 100)));
 		gpio_set_level(GPIO_NUM_25, valueOr(&fan, false));
 		gpio_set_level(GPIO_NUM_14, valueOr(&brakeLight, false));	//valueOr(&brakeLight, false)
+
+		uint32_t adc1_gpio39 = adc1_get_raw(ADC1_CHANNEL_3);	//read
+		uint32_t adc1_gpio34 = adc1_get_raw(ADC1_CHANNEL_7);
+		uint32_t adc1_gpio35 = adc1_get_raw(ADC1_CHANNEL_6);
+		uint32_t pinVoltageX = esp_adc_cal_raw_to_voltage(adc1_gpio39, &characteristics); // this value returns to milivolts
+		uint32_t pinVoltageY = esp_adc_cal_raw_to_voltage(adc1_gpio34, &characteristics);
+		uint32_t pinVoltageZ = esp_adc_cal_raw_to_voltage(adc1_gpio35, &characteristics);
+
+		float sensorVoltageX = map(pinVoltageX, 0, 3000, -3, 3);
+		float sensorVoltageY = map(pinVoltageY, 0, 3000, -3, 3);
+		float sensorVoltageZ = map(pinVoltageZ, 0, 3000, -3, 3);
+
+		voltageX = sensorVoltageX * 1000;
+		voltageY = sensorVoltageY * 1000;
+		voltageZ = sensorVoltageZ * 1000;
+
 
 		wait(5); // This control loop will be run at 200Hz
 	}
