@@ -211,7 +211,7 @@ int16_t i16ValueOr(CAN_int16_data_t* data, int16_t ifInvalid) {
 	return ifInvalid;
 }
 
-bool dataIsValid(CAN_bool_data_t* data) {
+bool boolDataIsValid(CAN_bool_data_t* data) {
 	if(data->lastUpdate == 0)
 		return false; // Data has never been updated
 	if(data->lastUpdate + data->invalidAfter < millis())
@@ -219,8 +219,8 @@ bool dataIsValid(CAN_bool_data_t* data) {
 	return true;
 }
 
-bool valueOr(CAN_bool_data_t* data, bool ifInvalid) {
-	if(dataIsValid(data))
+bool boolValueOr(CAN_bool_data_t* data, bool ifInvalid) {
+	if(boolDataIsValid(data))
 		return data->data;
 	return ifInvalid;
 }
@@ -381,7 +381,7 @@ static void ctrl_task() {
 	while(true) {
 		neutral = !gpio_get_level(GPIO_NUM_12);
 		
-		gpio_set_level(GPIO_NUM_32, valueOr(&starter, false));
+		gpio_set_level(GPIO_NUM_32, boolValueOr(&starter, false));
 		// This is a fuel pressure regulator in software if you need it
 		/*float fPressure = ((float) i16ValueOr(&fuelPressure, 0)) / 10.0;
 		if(valueOr(&fuel, (i16ValueOr(&rpm, 105) > 100))) {
@@ -396,9 +396,9 @@ static void ctrl_task() {
 		} else {
 			gpio_set_level(GPIO_NUM_33, false);
 		}	*/
-		gpio_set_level(GPIO_NUM_33, valueOr(&fuel, (i16ValueOr(&rpm, 105) > 100)));
-		gpio_set_level(GPIO_NUM_25, valueOr(&fan, false));
-		gpio_set_level(GPIO_NUM_14, valueOr(&brakeLight, false));	//valueOr(&brakeLight, false)
+		gpio_set_level(GPIO_NUM_33, boolValueOr(&fuel, (i16ValueOr(&rpm, 105) > 100)));
+		gpio_set_level(GPIO_NUM_25, boolValueOr(&fan, false));
+		gpio_set_level(GPIO_NUM_14, boolValueOr(&brakeLight, false));	//valueOr(&brakeLight, false)
 
 		uint32_t adc1_gpio39 = adc1_get_raw(ADC1_CHANNEL_3);	//read
 		uint32_t adc1_gpio34 = adc1_get_raw(ADC1_CHANNEL_7);
