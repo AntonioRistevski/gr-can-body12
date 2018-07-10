@@ -378,6 +378,21 @@ static void can_tx_task() {
 }
 
 static void ctrl_task() {
+
+uint32_t adc1_gpio39 = adc1_get_raw(ADC1_CHANNEL_3);	//read
+
+		uint32_t adc1_gpio34 = adc1_get_raw(ADC1_CHANNEL_7);
+		uint32_t adc1_gpio35 = adc1_get_raw(ADC1_CHANNEL_6);
+		uint32_t pinVoltageXInt = esp_adc_cal_raw_to_voltage(adc1_gpio39, &characteristics); // this value returns to milivolts
+		uint32_t pinVoltageYInt = esp_adc_cal_raw_to_voltage(adc1_gpio34, &characteristics);
+		uint32_t pinVoltageZInt = esp_adc_cal_raw_to_voltage(adc1_gpio35, &characteristics);
+
+		float sensorVoltageXInt = map(pinVoltageXInt, 0, 3000, -3, 3);
+		float sensorVoltageYInt = map(pinVoltageYInt, 0, 3000, -3, 3);
+		float sensorVoltageZInt = map(pinVoltageZInt, 0, 3000, -3, 3);
+
+		wait(5);
+
 	while(true) {
 		neutral = !gpio_get_level(GPIO_NUM_12);
 		
@@ -407,9 +422,9 @@ static void ctrl_task() {
 		uint32_t pinVoltageY = esp_adc_cal_raw_to_voltage(adc1_gpio34, &characteristics);
 		uint32_t pinVoltageZ = esp_adc_cal_raw_to_voltage(adc1_gpio35, &characteristics);
 
-		float sensorVoltageX = map(pinVoltageX, 0, 3000, -3, 3);
-		float sensorVoltageY = map(pinVoltageY, 0, 3000, -3, 3);
-		float sensorVoltageZ = map(pinVoltageZ, 0, 3000, -3, 3);
+		float sensorVoltageX = map(pinVoltageX, 0, 3000, -3, 3) - sensorVoltageXInt;
+		float sensorVoltageY = map(pinVoltageY, 0, 3000, -3, 3) - sensorVoltageYInt;
+		float sensorVoltageZ = map(pinVoltageZ, 0, 3000, -3, 3) - sensorVoltageZInt;
 
 		voltageX = sensorVoltageX * 1000;
 		voltageY = sensorVoltageY * 1000;
