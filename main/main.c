@@ -55,6 +55,12 @@ int16_t voltageX = 0;
 int16_t voltageY = 0;
 int16_t voltageZ = 0;
 
+int16_t VoltageXInt = 0;
+int16_t VoltageYInt = 0;
+int16_t VoltageZInt = 0;
+
+
+
 static void uart_read_task();
 static void uart_action_task();
 static void can_rx_task();
@@ -354,6 +360,7 @@ static void can_rx_task() {
 static void can_tx_task() {
 	unsigned char toSend[1];
 	unsigned char accel[6];
+	unsigned char accelinit[6];
 
 	while(true) {		
 		toSend[0] = neutral;
@@ -374,15 +381,29 @@ static void can_tx_task() {
 		if(transmit)
 			CAN_send(0x380, 6, accel);
 		wait(5);
+
+		accelinit[0] = VoltageXInt >> 8;
+		accelinit[1] = VoltageXInt;
+		accelinit[2] = VoltageYInt >> 8;
+		accelinit[3] = VoltageYInt;
+		accelinit[4] = VoltageZInt >> 8;
+		accelinit[5] = VoltageZInt;
+
+		if(transmit)
+			CAN_send(0x381, 6, accelinit);
+		wait(5);
+
+
+
 	}
 }
 
 static void ctrl_task() {
 
-uint32_t adc1_gpio39 = adc1_get_raw(ADC1_CHANNEL_3);	//read
-
+		uint32_t adc1_gpio39 = adc1_get_raw(ADC1_CHANNEL_3);	//read
 		uint32_t adc1_gpio34 = adc1_get_raw(ADC1_CHANNEL_7);
 		uint32_t adc1_gpio35 = adc1_get_raw(ADC1_CHANNEL_6);
+
 		uint32_t pinVoltageXInt = esp_adc_cal_raw_to_voltage(adc1_gpio39, &characteristics); // this value returns to milivolts
 		uint32_t pinVoltageYInt = esp_adc_cal_raw_to_voltage(adc1_gpio34, &characteristics);
 		uint32_t pinVoltageZInt = esp_adc_cal_raw_to_voltage(adc1_gpio35, &characteristics);
@@ -391,6 +412,10 @@ uint32_t adc1_gpio39 = adc1_get_raw(ADC1_CHANNEL_3);	//read
 		float sensorVoltageYInt = map(pinVoltageYInt, 0, 3000, -3, 3);
 		float sensorVoltageZInt = map(pinVoltageZInt, 0, 3000, -3, 3);
 
+		VoltageXInt = sensorVoltageXInt;
+		VoltageYInt = sensorVoltageYInt;
+		VoltageZInt = sensorVoltageZInt;
+		
 		wait(5);
 
 	while(true) {
