@@ -24,6 +24,8 @@
 #define CAN_QUEUE_SZ 		(100)
 #define CAN_SPEED			(CAN_SPEED_500KBPS)
 
+#define MULTISAMPLING		(10)
+
 typedef struct {
 	int16_t data;
 	unsigned long lastUpdate;
@@ -58,8 +60,6 @@ int16_t voltageZ = 0;
 int16_t VoltageXInt = 0;
 int16_t VoltageYInt = 0;
 int16_t VoltageZInt = 0;
-
-
 
 static void uart_read_task();
 static void uart_action_task();
@@ -101,8 +101,6 @@ void initGPIO() {
 	if(gpio_config(&io_conf) != ESP_OK)
 		println("Error setting up GPIO 35");
 
-
-
 	// GPIO 34 is Y - Axis | Accelerometer
 	io_conf.mode = GPIO_MODE_INPUT;
 	io_conf.pin_bit_mask = GPIO_SEL_35;
@@ -111,7 +109,6 @@ void initGPIO() {
 	if(gpio_config(&io_conf) != ESP_OK)
 		println("Error setting up GPIO 35");
 
-
 	// GPIO 39 is X - Axis | Accelerometer
 	io_conf.mode = GPIO_MODE_INPUT;
 	io_conf.pin_bit_mask = GPIO_SEL_35;
@@ -119,7 +116,6 @@ void initGPIO() {
 	io_conf.pull_up_en = false;
 	if(gpio_config(&io_conf) != ESP_OK)
 		println("Error setting up GPIO 35");
-
 
 	// GPIO 32 is starter relay
 	io_conf.intr_type = GPIO_PIN_INTR_DISABLE;
@@ -169,7 +165,6 @@ void initGPIO() {
 	adc1_config_channel_atten(ADC1_CHANNEL_6,ADC_ATTEN_DB_11);	//and attetntuation | Channel 6 = gpio34 | 11 db = 0 to 3.9v attentuation
 	adc1_config_channel_atten(ADC1_CHANNEL_7,ADC_ATTEN_DB_11);	//and attetntuation | Channel 7 = gpio35 | 11 db = 0 to 3.9v attentuation
 	esp_adc_cal_characterize(ADC_UNIT_1, ADC_ATTEN_DB_11, ADC_WIDTH_BIT_12, 1101, &characteristics);
-
 }
 
 void initUART() {
@@ -399,10 +394,17 @@ static void can_tx_task() {
 }
 
 static void ctrl_task() {
-
-		uint32_t adc1_gpio39 = adc1_get_raw(ADC1_CHANNEL_3);	//read
-		uint32_t adc1_gpio34 = adc1_get_raw(ADC1_CHANNEL_7);
-		uint32_t adc1_gpio35 = adc1_get_raw(ADC1_CHANNEL_6);
+		uint32_t adc1_gpio39 = 0;
+		uint32_t adc1_gpio34 = 0;
+		uint32_t adc1_gpio35 = 0;
+		for(int i = 0; i < MULTISAMPLING; i++) {
+			adc1_gpio39 += adc1_get_raw(ADC1_CHANNEL_3);	//read
+			adc1_gpio34 += adc1_get_raw(ADC1_CHANNEL_7);
+			adc1_gpio35 += adc1_get_raw(ADC1_CHANNEL_6);
+		}
+		adc1_gpio39 /= MULTISAMPLING;
+		adc1_gpio34 /= MULTISAMPLING;
+		adc1_gpio35 /= MULTISAMPLING;
 
 		uint32_t pinVoltageXInt = esp_adc_cal_raw_to_voltage(adc1_gpio39, &characteristics); // this value returns to milivolts
 		uint32_t pinVoltageYInt = esp_adc_cal_raw_to_voltage(adc1_gpio34, &characteristics);
