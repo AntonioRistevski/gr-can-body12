@@ -1,4 +1,10 @@
 {
 	"editor.insertSpaces": false,
 	"C_Cpp.intelliSenseEngine": "Tag Parser",
+	"files.associations": {
+		"array": "c",
+		"vector": "c",
+		"xstring": "c",
+		"random": "c"
+	},
 }
