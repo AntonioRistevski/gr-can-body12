@@ -321,7 +321,8 @@ static void can_rx_task() {
 			unsigned long curTime = millis();
 			switch(frame.id) {
 				case 0x130:
-					if(frame.dlc == 1) {
+				// && frame.data.bytes[0] == ~frame.data.bytes[1]
+					if(frame.dlc == 2 || frame.dlc == 1) {
 						starter.data = (frame.data.bytes[0] & 1);
 						starter.lastUpdate = curTime;
 						fuel.data = (frame.data.bytes[0] >> 1) & 1;
@@ -387,38 +388,35 @@ static void can_tx_task() {
 		if(transmit)
 			CAN_send(0x381, 6, accelinit);
 		wait(5);
-
-
-
 	}
 }
 
 static void ctrl_task() {
-		uint32_t adc1_gpio39 = 0;
-		uint32_t adc1_gpio34 = 0;
-		uint32_t adc1_gpio35 = 0;
-		for(int i = 0; i < MULTISAMPLING; i++) {
-			adc1_gpio39 += adc1_get_raw(ADC1_CHANNEL_3);	//read
-			adc1_gpio34 += adc1_get_raw(ADC1_CHANNEL_7);
-			adc1_gpio35 += adc1_get_raw(ADC1_CHANNEL_6);
-		}
-		adc1_gpio39 /= MULTISAMPLING;
-		adc1_gpio34 /= MULTISAMPLING;
-		adc1_gpio35 /= MULTISAMPLING;
+	uint32_t adc1_gpio39 = 0;
+	uint32_t adc1_gpio34 = 0;
+	uint32_t adc1_gpio35 = 0;
+	for(int i = 0; i < MULTISAMPLING; i++) {
+		adc1_gpio39 += adc1_get_raw(ADC1_CHANNEL_3);	//read
+		adc1_gpio34 += adc1_get_raw(ADC1_CHANNEL_7);
+		adc1_gpio35 += adc1_get_raw(ADC1_CHANNEL_6);
+	}
+	adc1_gpio39 /= MULTISAMPLING;
+	adc1_gpio34 /= MULTISAMPLING;
+	adc1_gpio35 /= MULTISAMPLING;
 
-		uint32_t pinVoltageXInt = esp_adc_cal_raw_to_voltage(adc1_gpio39, &characteristics); // this value returns to milivolts
-		uint32_t pinVoltageYInt = esp_adc_cal_raw_to_voltage(adc1_gpio34, &characteristics);
-		uint32_t pinVoltageZInt = esp_adc_cal_raw_to_voltage(adc1_gpio35, &characteristics);
+	uint32_t pinVoltageXInt = esp_adc_cal_raw_to_voltage(adc1_gpio39, &characteristics); // this value returns to milivolts
+	uint32_t pinVoltageYInt = esp_adc_cal_raw_to_voltage(adc1_gpio34, &characteristics);
+	uint32_t pinVoltageZInt = esp_adc_cal_raw_to_voltage(adc1_gpio35, &characteristics);
 
-		float sensorVoltageXInt = map(pinVoltageXInt, 0, 3000, -3, 3);
-		float sensorVoltageYInt = map(pinVoltageYInt, 0, 3000, -3, 3);
-		float sensorVoltageZInt = map(pinVoltageZInt, 0, 3000, -3, 3);
+	float sensorVoltageXInt = map(pinVoltageXInt, 0, 3000, -3, 3);
+	float sensorVoltageYInt = map(pinVoltageYInt, 0, 3000, -3, 3);
+	float sensorVoltageZInt = map(pinVoltageZInt, 0, 3000, -3, 3);
 
-		VoltageXInt = sensorVoltageXInt;
-		VoltageYInt = sensorVoltageYInt;
-		VoltageZInt = sensorVoltageZInt;
-		
-		wait(5);
+	VoltageXInt = sensorVoltageXInt * 1000;
+	VoltageYInt = sensorVoltageYInt * 1000;
+	VoltageZInt = sensorVoltageZInt * 1000;
+	
+	wait(5);
 
 	while(true) {
 		neutral = !gpio_get_level(GPIO_NUM_12);
