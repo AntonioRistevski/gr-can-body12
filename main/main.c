@@ -24,7 +24,10 @@
 #define CAN_QUEUE_SZ 		(100)
 #define CAN_SPEED			(CAN_SPEED_500KBPS)
 
-#define MULTISAMPLING		(10)
+#define MULTISAMPLING		(100)
+
+#define CAL_USE_PRESSURE_SENSOR_1	(0)
+#define CAL_USE_PRESSURE_SENSOR_2	(1)
 
 typedef struct {
 	int16_t data;
@@ -332,7 +335,13 @@ static void can_rx_task() {
 					}
 					break;
 				case 0x120:
-					brakeLight.data = (frame.data.bytes[0] & 1);
+					brakeLight.data = 0;
+					if(getCalibrationOr(CAL_USE_PRESSURE_SENSOR_1, true)) {
+						brakeLight.data = ((frame.data.bytes[0] >> 1) & 1);
+					}
+					if(getCalibrationOr(CAL_USE_PRESSURE_SENSOR_2, true)) {
+						brakeLight.data |= ((frame.data.bytes[0] >> 2) & 1);
+					}
 					brakeLight.lastUpdate = curTime;
 					break;
 				case 0x5F0:
@@ -454,7 +463,6 @@ static void ctrl_task() {
 		voltageX = sensorVoltageX * 1000;
 		voltageY = sensorVoltageY * 1000;
 		voltageZ = sensorVoltageZ * 1000;
-
 
 		wait(5); // This control loop will be run at 200Hz
 	}
