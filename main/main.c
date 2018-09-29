@@ -28,6 +28,9 @@
 
 #define CAL_USE_PRESSURE_SENSOR_1	(0)
 #define CAL_USE_PRESSURE_SENSOR_2	(1)
+#define CAL_USE_FAN_CONTROL			(2)
+#define CAL_FAN_ON_TEMP				(3)
+#define CAL_FAN_OFF_TEMP			(4)
 
 typedef struct {
 	int16_t data;
@@ -54,6 +57,7 @@ CAN_bool_data_t fan;
 CAN_bool_data_t brakeLight;
 CAN_int16_data_t rpm;
 CAN_int16_data_t fuelPressure;
+CAN_int16_data_t coolant;
 bool neutral = false;
 
 int16_t voltageX = 0;
@@ -64,11 +68,12 @@ int16_t VoltageXInt = 0;
 int16_t VoltageYInt = 0;
 int16_t VoltageZInt = 0;
 
+bool fanRunningByAlgorithm = false;
+
 static void uart_read_task();
 static void uart_action_task();
 static void can_rx_task();
 static void ctrl_task();
-
 
 float map(float x, float in_min, float in_max, float out_min, float out_max) {
 	return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
@@ -93,6 +98,9 @@ void initVariables() {
 	fuelPressure.data = 0;
 	fuelPressure.lastUpdate = 0;
 	fuelPressure.invalidAfter = 100;
+	coolant.data = 0;
+	coolant.lastUpdate = 0;
+	coolant.invalidAfter = 5000;
 }
 
 void initGPIO() {
@@ -350,6 +358,12 @@ static void can_rx_task() {
 						rpm.lastUpdate = millis();
 					}
 					break;
+				case 0x5F2:
+					if(frame.dlc == 8) {
+						coolant.data = ((frame.data.bytes[6]) << 8) | frame.data.bytes[7];
+						coolant.lastUpdate = millis();
+					}
+					break;
 				case 0x5FD:
 					if(frame.dlc == 8) {
 						fuelPressure.data = (((frame.data.bytes[0]) << 8) | frame.data.bytes[1]);
@@ -369,7 +383,7 @@ static void can_tx_task() {
 
 	while(true) {		
 		toSend[0] = neutral;
-		//toSend[0] |= (lastFuel & 0x1) << 1;
+		toSend[0] |= (fanRunningByAlgorithm & 0x1) << 1;
 		//toSend[1] = fuelFaults;
 		
 		if(transmit)
@@ -398,6 +412,25 @@ static void can_tx_task() {
 			CAN_send(0x381, 6, accelinit);
 		wait(5);
 	}
+}
+
+bool fanShouldRun() {
+	if(!getCalibrationOr(CAL_USE_FAN_CONTROL, true))
+		return false; // Global disable
+
+	uint16_t calculatedRPM = i16ValueOr(&rpm, 0);
+	uint16_t calculatedClt = i16ValueOr(&coolant, 100);
+
+	if(calculatedRPM < 1000)
+		return false; // Do not run the fan if we're not running the car
+
+	if(calculatedClt > getCalibrationOr(CAL_FAN_ON_TEMP, 180))
+		fanRunningByAlgorithm = true;
+
+	if(calculatedClt < getCalibrationOr(CAL_FAN_OFF_TEMP, 160))
+		fanRunningByAlgorithm = false;
+
+	return fanRunningByAlgorithm;
 }
 
 static void ctrl_task() {
@@ -430,7 +463,7 @@ static void ctrl_task() {
 	while(true) {
 		neutral = !gpio_get_level(GPIO_NUM_12);
 		
-		gpio_set_level(GPIO_NUM_32, boolValueOr(&starter, false));
+		gpio_set_level(GPIO_NUM_32, boolValueOr(&starter, fanShouldRun()));
 		// This is a fuel pressure regulator in software if you need it
 		/*float fPressure = ((float) i16ValueOr(&fuelPressure, 0)) / 10.0;
 		if(valueOr(&fuel, (i16ValueOr(&rpm, 105) > 100))) {
@@ -446,7 +479,7 @@ static void ctrl_task() {
 			gpio_set_level(GPIO_NUM_33, false);
 		}	*/
 		gpio_set_level(GPIO_NUM_33, boolValueOr(&fuel, (i16ValueOr(&rpm, 105) > 100)));
-		gpio_set_level(GPIO_NUM_25, boolValueOr(&fan, false));
+		gpio_set_level(GPIO_NUM_25, boolValueOr(&fan, fanShouldRun()));
 		gpio_set_level(GPIO_NUM_14, boolValueOr(&brakeLight, false));	//valueOr(&brakeLight, false)
 
 		uint32_t adc1_gpio39 = adc1_get_raw(ADC1_CHANNEL_3);	//read
