@@ -463,7 +463,7 @@ static void ctrl_task() {
 	while(true) {
 		neutral = !gpio_get_level(GPIO_NUM_12);
 		
-		gpio_set_level(GPIO_NUM_32, boolValueOr(&starter, fanShouldRun()));
+		gpio_set_level(GPIO_NUM_32, boolValueOr(&starter, false));
 		// This is a fuel pressure regulator in software if you need it
 		/*float fPressure = ((float) i16ValueOr(&fuelPressure, 0)) / 10.0;
 		if(valueOr(&fuel, (i16ValueOr(&rpm, 105) > 100))) {
