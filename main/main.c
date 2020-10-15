@@ -32,6 +32,33 @@
 #define CAL_FAN_ON_TEMP				(3)
 #define CAL_FAN_OFF_TEMP			(4)
 
+//Begin Util
+//Copied util here. CMAKE grabs util file, but something in compiler does not.
+	unsigned long millis() {
+		return xTaskGetTickCount() * portTICK_PERIOD_MS;
+	}
+	void wait(unsigned int ms) {
+		vTaskDelay(ms / portTICK_PERIOD_MS);
+	}
+	void print(const char* str) {
+		uart_write_bytes(UART_NUM_1, str, strlen(str));
+	}
+
+	void println(const char* str) {
+		print(str);
+		print("\n");
+	}
+
+	static char fmtbuf[UART_FMT_BUF_SZ];
+	void printfmt(const char* format, ...) {
+		va_list args;
+		va_start(args, format);
+		vsprintf(fmtbuf, format, args);
+		va_end(args);
+		print(fmtbuf);
+	}
+//End Util
+
 typedef struct {
 	int16_t data;
 	unsigned long lastUpdate;
@@ -205,7 +232,7 @@ void initCAN_UDS() {
 	CAN_UDS_cfg.inId = 0x722;
 	CAN_UDS_cfg.queue = xQueueCreate(CAN_QUEUE_SZ, sizeof(CAN_frame_t));
 	strcpy(CAN_UDS_cfg.name, "Body Control Module");
-	strcpy(CAN_UDS_cfg.version, GRVERSION);
+	strcpy(CAN_UDS_cfg.version, "2");
 	CAN_UDS_init();
 }
 
