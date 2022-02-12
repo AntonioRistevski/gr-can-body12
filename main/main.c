@@ -132,7 +132,7 @@ void initVariables() {
 
 void initGPIO() {
 	gpio_config_t io_conf;
-
+		//All 3 of the accelerator axes are referenced later in the ctrl task.
 	// GPIO 35 is Z - Axis | Accelerometer
 	io_conf.mode = GPIO_MODE_INPUT;
 	io_conf.pin_bit_mask = GPIO_SEL_35;
@@ -141,7 +141,7 @@ void initGPIO() {
 
 	// GPIO 34 is Y - Axis | Accelerometer
 	io_conf.mode = GPIO_MODE_INPUT;
-	io_conf.pin_bit_mask = GPIO_SEL_35;
+	io_conf.pin_bit_mask = GPIO_SEL_35; //Is this an error? This looks like it is being set up for GPIO 35 when it is meant to be 34
 	io_conf.pull_down_en = true;
 	io_conf.pull_up_en = false;
 	if(gpio_config(&io_conf) != ESP_OK)
@@ -149,12 +149,12 @@ void initGPIO() {
 
 	// GPIO 39 is X - Axis | Accelerometer
 	io_conf.mode = GPIO_MODE_INPUT;
-	io_conf.pin_bit_mask = GPIO_SEL_35;
+	io_conf.pin_bit_mask = GPIO_SEL_35; //Is this an error? This looks like it is being set up for GPIO 35 when it is meant to be 39
 	io_conf.pull_down_en = true;
 	io_conf.pull_up_en = false;
 	if(gpio_config(&io_conf) != ESP_OK)
 		println("Error setting up GPIO 35");
-
+		//GPIO 32 is referenced once on line 493. 33,25, and 14 are referenced similarly nearby
 	// GPIO 32 is starter relay
 	io_conf.intr_type = GPIO_PIN_INTR_DISABLE;
 	io_conf.mode = GPIO_MODE_OUTPUT;
@@ -187,7 +187,7 @@ void initGPIO() {
 	io_conf.pull_up_en = false;
 	if(gpio_config(&io_conf) != ESP_OK)
 		println("Error setting up GPIO 14");
-	
+		//GPIO 12 is referenced once on line 491
 	// GPIO 12 is neutral sense
 	io_conf.mode = GPIO_MODE_INPUT;
 	io_conf.pin_bit_mask = GPIO_SEL_12;
@@ -442,6 +442,9 @@ static void can_tx_task() {
 }
 
 bool fanShouldRun() {
+	if(boolValueOr(&starter, false)) //Do not run the fan if the starter is on
+		return false;
+//Test 447
 	if(!getCalibrationOr(CAL_USE_FAN_CONTROL, true))
 		return false; // Global disable
 
