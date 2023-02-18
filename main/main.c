@@ -369,6 +369,11 @@ static void can_rx_task() {
 						fuel.lastUpdate = curTime;
 						fan.data = (frame.data.bytes[0] >> 2) & 1;
 						fan.lastUpdate = curTime;
+						int fanVal = fan.data;
+						int fuelVal = fuel.data;
+						printf("fan value is %d \n", fanVal); 
+						printf("fuel value is %d \n", fuelVal);
+
 					}
 					break;
 				case 0x120:
@@ -450,6 +455,8 @@ bool fanShouldRun() {
 	uint16_t calculatedRPM = i16ValueOr(&rpm, 0);
 	uint16_t calculatedClt = i16ValueOr(&coolant, 100);
 
+	//this line may help explain why the fans have not been running during our tests. 
+	//this does not explain the behavior of the fuel pump, however. 
 	if(calculatedRPM < 1000)
 		return false; // Do not run the fan if we're not running the car
 
